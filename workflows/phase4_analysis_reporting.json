@@ -18,7 +18,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT rs.*, sd.stealth_level, sd.scope_name\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.session_id }}'\nAND rs.status = 'phase3_completed'",
+        "query": "SELECT rs.*, sd.stealth_level, sd.scope_name\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.body.session_id }}'\nAND rs.status = 'phase3_completed'",
         "options": {}
       },
       "id": "load-session",
@@ -38,7 +38,7 @@
         "conditions": {
           "boolean": [
             {
-              "value1": "={{ $json.session_id }}",
+              "value1": "={{ $json.body.session_id }}",
               "operation": "exists"
             }
           ]
@@ -53,7 +53,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ {\"error\": \"Session not ready for Phase 4\", \"session_id\": $('Webhook: Start Phase 4').item.json.session_id} }}",
+        "responseBody": "={{ {\"error\": \"Session not ready for Phase 4\", \"session_id\": $('Webhook: Start Phase 4').item.json.body.session_id} }}",
         "options": {
           "responseCode": 400
         }
@@ -67,7 +67,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase4_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}'",
+        "query": "UPDATE recon_sessions SET status = 'phase4_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase4",
@@ -85,7 +85,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.session_id }}',\n  'phase4',\n  'analysis_started',\n  '{\"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}',\n  'phase4',\n  'analysis_started',\n  '{\"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase4-start",
@@ -103,7 +103,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- Aggregate all statistics\nSELECT \n  '{{ $('Webhook: Start Phase 4').item.json.session_id }}' as session_id,\n  (SELECT COUNT(DISTINCT subdomain) FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}') as subdomain_count,\n  (SELECT COUNT(*) FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}') as http_service_count,\n  (SELECT COUNT(*) FROM port_scan_results WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}') as open_port_count,\n  (SELECT COUNT(*) FROM api_endpoints WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}') as endpoint_count,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}') as total_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}' AND severity = 'critical') as critical_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}' AND severity = 'high') as high_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}' AND severity = 'medium') as medium_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}' AND severity = 'low') as low_vulns",
+        "query": "-- Aggregate all statistics\nSELECT \n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}' as session_id,\n  (SELECT COUNT(DISTINCT subdomain) FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}') as subdomain_count,\n  (SELECT COUNT(*) FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}') as http_service_count,\n  (SELECT COUNT(*) FROM port_scan_results WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}') as open_port_count,\n  (SELECT COUNT(*) FROM api_endpoints WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}') as endpoint_count,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}') as total_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}' AND severity = 'critical') as critical_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}' AND severity = 'high') as high_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}' AND severity = 'medium') as medium_vulns,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}' AND severity = 'low') as low_vulns",
         "options": {}
       },
       "id": "aggregate-statistics",
@@ -121,7 +121,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- Load all unique vulnerabilities (deduplicated by finding_hash)\nSELECT \n  vf.*,\n  fh.occurrence_count,\n  fh.first_seen,\n  fh.last_seen\nFROM vulnerability_findings vf\nJOIN finding_hashes fh ON vf.finding_hash = fh.finding_hash\nWHERE vf.session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}'\nORDER BY \n  CASE vf.severity\n    WHEN 'critical' THEN 1\n    WHEN 'high' THEN 2\n    WHEN 'medium' THEN 3\n    WHEN 'low' THEN 4\n    ELSE 5\n  END,\n  vf.created_at DESC\nLIMIT 1000",
+        "query": "-- Load all unique vulnerabilities (deduplicated by finding_hash)\nSELECT \n  vf.*,\n  fh.occurrence_count,\n  fh.first_seen,\n  fh.last_seen\nFROM vulnerability_findings vf\nJOIN finding_hashes fh ON vf.finding_hash = fh.finding_hash\nWHERE vf.session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'\nORDER BY \n  CASE vf.severity\n    WHEN 'critical' THEN 1\n    WHEN 'high' THEN 2\n    WHEN 'medium' THEN 3\n    WHEN 'low' THEN 4\n    ELSE 5\n  END,\n  vf.created_at DESC\nLIMIT 1000",
         "options": {}
       },
       "id": "load-vulnerabilities",
@@ -177,7 +177,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Generate executive summary and detailed report\nconst sessionId = $('Webhook: Start Phase 4').item.json.session_id;\nconst stats = $('Aggregate All Statistics').item.json;\nconst target = $('Load Session Details').item.json.target;\nconst scopeName = $('Load Session Details').item.json.scope_name;\n\nconst vulnerabilities = $('Calculate Risk Scores').all();\n\n// Group vulnerabilities by severity\nconst bySeverity = {\n  critical: vulnerabilities.filter(v => v.json.severity === 'critical'),\n  high: vulnerabilities.filter(v => v.json.severity === 'high'),\n  medium: vulnerabilities.filter(v => v.json.severity === 'medium'),\n  low: vulnerabilities.filter(v => v.json.severity === 'low')\n};\n\n// Calculate overall risk rating\nlet overallRisk = 'Low';\nif (bySeverity.critical.length > 0) {\n  overallRisk = 'Critical';\n} else if (bySeverity.high.length >= 5) {\n  overallRisk = 'High';\n} else if (bySeverity.high.length > 0 || bySeverity.medium.length >= 10) {\n  overallRisk = 'Medium';\n}\n\n// Generate executive summary\nconst executiveSummary = `\n# Red Team Assessment Report\n\n**Target:** ${target}\n**Scope:** ${scopeName}\n**Session ID:** ${sessionId}\n**Assessment Date:** ${new Date().toISOString().split('T')[0]}\n**Overall Risk Rating:** ${overallRisk}\n\n## Executive Summary\n\nThis report presents the findings from an authorized red team reconnaissance assessment conducted against ${target}. The assessment was performed in accordance with the authorized scope definition and followed a structured 4-phase methodology.\n\n### Key Findings\n\n- **Subdomains Discovered:** ${stats.subdomain_count}\n- **HTTP Services Identified:** ${stats.http_service_count}\n- **Open Ports Found:** ${stats.open_port_count}\n- **API Endpoints Discovered:** ${stats.endpoint_count}\n\n### Vulnerability Summary\n\n- **Critical Vulnerabilities:** ${stats.critical_vulns}\n- **High Vulnerabilities:** ${stats.high_vulns}\n- **Medium Vulnerabilities:** ${stats.medium_vulns}\n- **Low Vulnerabilities:** ${stats.low_vulns}\n- **Total Findings:** ${stats.total_vulns}\n\n### Risk Assessment\n\nThe overall risk rating for this assessment is **${overallRisk}**. ${overallRisk === 'Critical' ? 'Immediate action is required to address critical vulnerabilities.' : overallRisk === 'High' ? 'Prompt remediation of high-severity findings is strongly recommended.' : 'Continue monitoring and address findings based on priority.'}\n\n### Immediate Action Items\n\n${bySeverity.critical.length > 0 ? '**Critical Priority:**\\n' + bySeverity.critical.slice(0, 5).map((v, i) => `${i + 1}. ${v.json.description} - ${v.json.host}`).join('\\n') : 'No critical vulnerabilities found.'}\n\n---\n\n## Detailed Findings\n\n`;\n\n// Generate detailed findings section\nlet detailedFindings = '';\n\n['critical', 'high', 'medium', 'low'].forEach(severity => {\n  const vulns = bySeverity[severity];\n  if (vulns.length > 0) {\n    detailedFindings += `\\n### ${severity.toUpperCase()} Severity (${vulns.length} findings)\\n\\n`;\n    \n    vulns.slice(0, 50).forEach((v, index) => {\n      const vuln = v.json;\n      detailedFindings += `\n#### ${index + 1}. ${vuln.description}\n\n- **Severity:** ${vuln.severity}\n- **Risk Score:** ${vuln.risk_score}/10\n- **Host:** ${vuln.host}\n- **URL:** ${vuln.url}\n- **Type:** ${vuln.vuln_type}\n- **Impact:** ${vuln.impact}\n- **First Seen:** ${new Date(vuln.first_seen).toISOString().split('T')[0]}\n- **Occurrences:** ${vuln.occurrence_count}\n\n**Details:**\n\\`\\`\\`json\n${JSON.stringify(vuln.details, null, 2).substring(0, 500)}\n\\`\\`\\`\n\n---\n\n`;\n    });\n  }\n});\n\nconst fullReport = executiveSummary + detailedFindings;\n\n// Generate JSON summary for database storage\nconst reportSummary = {\n  session_id: sessionId,\n  target: target,\n  scope_name: scopeName,\n  assessment_date: new Date().toISOString(),\n  overall_risk: overallRisk,\n  statistics: stats,\n  top_critical_findings: bySeverity.critical.slice(0, 10).map(v => ({\n    vuln_type: v.json.vuln_type,\n    host: v.json.host,\n    description: v.json.description,\n    risk_score: v.json.risk_score\n  })),\n  recommendations: [\n    bySeverity.critical.length > 0 ? 'Immediately address all critical vulnerabilities' : null,\n    bySeverity.high.length > 0 ? 'Remediate high-severity findings within 7 days' : null,\n    stats.subdomain_count > 20 ? 'Review subdomain inventory for unnecessary exposure' : null,\n    stats.open_port_count > 100 ? 'Reduce attack surface by closing unnecessary ports' : null\n  ].filter(r => r !== null)\n};\n\nconsole.log(`Generated report with ${stats.total_vulns} total findings`);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    report_markdown: fullReport,\n    report_summary: reportSummary,\n    generated_at: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// Generate executive summary and detailed report\nconst sessionId = $('Webhook: Start Phase 4').item.json.body.session_id;\nconst stats = $('Aggregate All Statistics').item.json;\nconst target = $('Load Session Details').item.json.target;\nconst scopeName = $('Load Session Details').item.json.scope_name;\n\nconst vulnerabilities = $('Calculate Risk Scores').all();\n\n// Group vulnerabilities by severity\nconst bySeverity = {\n  critical: vulnerabilities.filter(v => v.json.severity === 'critical'),\n  high: vulnerabilities.filter(v => v.json.severity === 'high'),\n  medium: vulnerabilities.filter(v => v.json.severity === 'medium'),\n  low: vulnerabilities.filter(v => v.json.severity === 'low')\n};\n\n// Calculate overall risk rating\nlet overallRisk = 'Low';\nif (bySeverity.critical.length > 0) {\n  overallRisk = 'Critical';\n} else if (bySeverity.high.length >= 5) {\n  overallRisk = 'High';\n} else if (bySeverity.high.length > 0 || bySeverity.medium.length >= 10) {\n  overallRisk = 'Medium';\n}\n\n// Generate executive summary\nconst executiveSummary = `\n# Red Team Assessment Report\n\n**Target:** ${target}\n**Scope:** ${scopeName}\n**Session ID:** ${sessionId}\n**Assessment Date:** ${new Date().toISOString().split('T')[0]}\n**Overall Risk Rating:** ${overallRisk}\n\n## Executive Summary\n\nThis report presents the findings from an authorized red team reconnaissance assessment conducted against ${target}. The assessment was performed in accordance with the authorized scope definition and followed a structured 4-phase methodology.\n\n### Key Findings\n\n- **Subdomains Discovered:** ${stats.subdomain_count}\n- **HTTP Services Identified:** ${stats.http_service_count}\n- **Open Ports Found:** ${stats.open_port_count}\n- **API Endpoints Discovered:** ${stats.endpoint_count}\n\n### Vulnerability Summary\n\n- **Critical Vulnerabilities:** ${stats.critical_vulns}\n- **High Vulnerabilities:** ${stats.high_vulns}\n- **Medium Vulnerabilities:** ${stats.medium_vulns}\n- **Low Vulnerabilities:** ${stats.low_vulns}\n- **Total Findings:** ${stats.total_vulns}\n\n### Risk Assessment\n\nThe overall risk rating for this assessment is **${overallRisk}**. ${overallRisk === 'Critical' ? 'Immediate action is required to address critical vulnerabilities.' : overallRisk === 'High' ? 'Prompt remediation of high-severity findings is strongly recommended.' : 'Continue monitoring and address findings based on priority.'}\n\n### Immediate Action Items\n\n${bySeverity.critical.length > 0 ? '**Critical Priority:**\\n' + bySeverity.critical.slice(0, 5).map((v, i) => `${i + 1}. ${v.json.description} - ${v.json.host}`).join('\\n') : 'No critical vulnerabilities found.'}\n\n---\n\n## Detailed Findings\n\n`;\n\n// Generate detailed findings section\nlet detailedFindings = '';\n\n['critical', 'high', 'medium', 'low'].forEach(severity => {\n  const vulns = bySeverity[severity];\n  if (vulns.length > 0) {\n    detailedFindings += `\\n### ${severity.toUpperCase()} Severity (${vulns.length} findings)\\n\\n`;\n    \n    vulns.slice(0, 50).forEach((v, index) => {\n      const vuln = v.json;\n      detailedFindings += `\n#### ${index + 1}. ${vuln.description}\n\n- **Severity:** ${vuln.severity}\n- **Risk Score:** ${vuln.risk_score}/10\n- **Host:** ${vuln.host}\n- **URL:** ${vuln.url}\n- **Type:** ${vuln.vuln_type}\n- **Impact:** ${vuln.impact}\n- **First Seen:** ${new Date(vuln.first_seen).toISOString().split('T')[0]}\n- **Occurrences:** ${vuln.occurrence_count}\n\n**Details:**\n\\`\\`\\`json\n${JSON.stringify(vuln.details, null, 2).substring(0, 500)}\n\\`\\`\\`\n\n---\n\n`;\n    });\n  }\n});\n\nconst fullReport = executiveSummary + detailedFindings;\n\n// Generate JSON summary for database storage\nconst reportSummary = {\n  session_id: sessionId,\n  target: target,\n  scope_name: scopeName,\n  assessment_date: new Date().toISOString(),\n  overall_risk: overallRisk,\n  statistics: stats,\n  top_critical_findings: bySeverity.critical.slice(0, 10).map(v => ({\n    vuln_type: v.json.vuln_type,\n    host: v.json.host,\n    description: v.json.description,\n    risk_score: v.json.risk_score\n  })),\n  recommendations: [\n    bySeverity.critical.length > 0 ? 'Immediately address all critical vulnerabilities' : null,\n    bySeverity.high.length > 0 ? 'Remediate high-severity findings within 7 days' : null,\n    stats.subdomain_count > 20 ? 'Review subdomain inventory for unnecessary exposure' : null,\n    stats.open_port_count > 100 ? 'Reduce attack surface by closing unnecessary ports' : null\n  ].filter(r => r !== null)\n};\n\nconsole.log(`Generated report with ${stats.total_vulns} total findings`);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    report_markdown: fullReport,\n    report_summary: reportSummary,\n    generated_at: new Date().toISOString()\n  }\n}];"
       },
       "id": "generate-report",
       "name": "Generate Executive Report",
@@ -188,7 +188,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=INSERT INTO scan_reports (\n  session_id,\n  report_format,\n  report_content,\n  report_summary,\n  generated_at,\n  created_at\n)\nVALUES (\n  '{{ $json.session_id }}',\n  'markdown',\n  '{{ $json.report_markdown }}',\n  '{{ JSON.stringify($json.report_summary) }}'::jsonb,\n  '{{ $json.generated_at }}',\n  NOW()\n)\nRETURNING id",
+        "query": "=INSERT INTO scan_reports (\n  session_id,\n  report_format,\n  report_content,\n  report_summary,\n  generated_at,\n  created_at\n)\nVALUES (\n  '{{ $json.body.session_id }}',\n  'markdown',\n  '{{ $json.report_markdown }}',\n  '{{ JSON.stringify($json.report_summary) }}'::jsonb,\n  '{{ $json.generated_at }}',\n  NOW()\n)\nRETURNING id",
         "options": {}
       },
       "id": "store-report",
@@ -205,7 +205,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Save report to file system\nconst fs = require('fs');\nconst sessionId = $('Webhook: Start Phase 4').item.json.session_id;\nconst reportContent = $('Generate Executive Report').item.json.report_markdown;\nconst reportSummary = $('Generate Executive Report').item.json.report_summary;\n\n// Create reports directory if it doesn't exist\nconst reportsDir = `/tmp/reports`;\ntry {\n  fs.mkdirSync(reportsDir, { recursive: true });\n} catch (e) {\n  console.log('Reports directory already exists');\n}\n\n// Save markdown report\nconst mdPath = `${reportsDir}/report_${sessionId}.md`;\nfs.writeFileSync(mdPath, reportContent);\n\n// Save JSON summary\nconst jsonPath = `${reportsDir}/summary_${sessionId}.json`;\nfs.writeFileSync(jsonPath, JSON.stringify(reportSummary, null, 2));\n\nconsole.log(`Report saved to ${mdPath}`);\nconsole.log(`Summary saved to ${jsonPath}`);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    markdown_path: mdPath,\n    json_path: jsonPath,\n    report_id: $('Store Report in Database').item.json.id\n  }\n}];"
+        "jsCode": "// Save report to file system\nconst fs = require('fs');\nconst sessionId = $('Webhook: Start Phase 4').item.json.body.session_id;\nconst reportContent = $('Generate Executive Report').item.json.report_markdown;\nconst reportSummary = $('Generate Executive Report').item.json.report_summary;\n\n// Create reports directory if it doesn't exist\nconst reportsDir = `/tmp/reports`;\ntry {\n  fs.mkdirSync(reportsDir, { recursive: true });\n} catch (e) {\n  console.log('Reports directory already exists');\n}\n\n// Save markdown report\nconst mdPath = `${reportsDir}/report_${sessionId}.md`;\nfs.writeFileSync(mdPath, reportContent);\n\n// Save JSON summary\nconst jsonPath = `${reportsDir}/summary_${sessionId}.json`;\nfs.writeFileSync(jsonPath, JSON.stringify(reportSummary, null, 2));\n\nconsole.log(`Report saved to ${mdPath}`);\nconsole.log(`Summary saved to ${jsonPath}`);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    markdown_path: mdPath,\n    json_path: jsonPath,\n    report_id: $('Store Report in Database').item.json.id\n  }\n}];"
       },
       "id": "save-report-files",
       "name": "Save Report to Filesystem",
@@ -216,7 +216,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- Identify potential attack chains\nSELECT \n  '{{ $('Webhook: Start Phase 4').item.json.session_id }}' as session_id,\n  vf1.host,\n  vf1.vuln_type as vuln_1,\n  vf2.vuln_type as vuln_2,\n  ARRAY[vf1.id, vf2.id] as vulnerability_ids,\n  'Chain: ' || vf1.vuln_type || ' -> ' || vf2.vuln_type as chain_description\nFROM vulnerability_findings vf1\nJOIN vulnerability_findings vf2 ON vf1.host = vf2.host AND vf1.id < vf2.id\nWHERE vf1.session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}'\n  AND vf1.severity IN ('critical', 'high')\n  AND vf2.severity IN ('critical', 'high')\nLIMIT 20",
+        "query": "-- Identify potential attack chains\nSELECT \n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}' as session_id,\n  vf1.host,\n  vf1.vuln_type as vuln_1,\n  vf2.vuln_type as vuln_2,\n  ARRAY[vf1.id, vf2.id] as vulnerability_ids,\n  'Chain: ' || vf1.vuln_type || ' -> ' || vf2.vuln_type as chain_description\nFROM vulnerability_findings vf1\nJOIN vulnerability_findings vf2 ON vf1.host = vf2.host AND vf1.id < vf2.id\nWHERE vf1.session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'\n  AND vf1.severity IN ('critical', 'high')\n  AND vf2.severity IN ('critical', 'high')\nLIMIT 20",
         "options": {}
       },
       "id": "identify-attack-chains",
@@ -234,7 +234,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=INSERT INTO attack_chains (\n  session_id,\n  host,\n  chain_description,\n  vulnerability_ids,\n  severity,\n  created_at\n)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.chain_description }}',\n  '{{ JSON.stringify($json.vulnerability_ids) }}'::jsonb,\n  'high',\n  NOW()\n)\nON CONFLICT DO NOTHING",
+        "query": "=INSERT INTO attack_chains (\n  session_id,\n  host,\n  chain_description,\n  vulnerability_ids,\n  severity,\n  created_at\n)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.chain_description }}',\n  '{{ JSON.stringify($json.vulnerability_ids) }}'::jsonb,\n  'high',\n  NOW()\n)\nON CONFLICT DO NOTHING",
         "options": {}
       },
       "id": "store-attack-chains",
@@ -263,7 +263,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET \n  status = 'completed',\n  completed_at = NOW(),\n  updated_at = NOW()\nWHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}'",
+        "query": "UPDATE recon_sessions SET \n  status = 'completed',\n  completed_at = NOW(),\n  updated_at = NOW()\nWHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-complete",
@@ -281,7 +281,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.session_id }}',\n  'phase4',\n  'scan_completed',\n  '{\"end_time\": \"{{ $now }}\", \"report_id\": {{ $('Save Report to Filesystem').item.json.report_id }}}'::jsonb,\n  NOW()\n)",
+        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}',\n  'phase4',\n  'scan_completed',\n  '{\"end_time\": \"{{ $now }}\", \"report_id\": {{ $('Save Report to Filesystem').item.json.report_id }}}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-scan-complete",
@@ -299,7 +299,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- Get final session summary with timing information\nSELECT \n  rs.session_id,\n  rs.target,\n  rs.status,\n  rs.created_at as started_at,\n  rs.completed_at,\n  EXTRACT(EPOCH FROM (rs.completed_at - rs.created_at))/60 as duration_minutes,\n  sr.report_summary,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = rs.session_id AND severity = 'critical') as critical_count,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = rs.session_id AND severity = 'high') as high_count,\n  (SELECT COUNT(*) FROM attack_chains WHERE session_id = rs.session_id) as attack_chain_count\nFROM recon_sessions rs\nLEFT JOIN scan_reports sr ON rs.session_id = sr.session_id\nWHERE rs.session_id = '{{ $('Webhook: Start Phase 4').item.json.session_id }}'",
+        "query": "-- Get final session summary with timing information\nSELECT \n  rs.session_id,\n  rs.target,\n  rs.status,\n  rs.created_at as started_at,\n  rs.completed_at,\n  EXTRACT(EPOCH FROM (rs.completed_at - rs.created_at))/60 as duration_minutes,\n  sr.report_summary,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = rs.session_id AND severity = 'critical') as critical_count,\n  (SELECT COUNT(*) FROM vulnerability_findings WHERE session_id = rs.session_id AND severity = 'high') as high_count,\n  (SELECT COUNT(*) FROM attack_chains WHERE session_id = rs.session_id) as attack_chain_count\nFROM recon_sessions rs\nLEFT JOIN scan_reports sr ON rs.session_id = sr.session_id\nWHERE rs.session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "get-final-summary",
@@ -317,7 +317,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ {\n  \"status\": \"completed\",\n  \"session_id\": $('Webhook: Start Phase 4').item.json.session_id,\n  \"target\": $('Get Final Session Summary').item.json.target,\n  \"duration_minutes\": Math.round($('Get Final Session Summary').item.json.duration_minutes),\n  \"critical_vulnerabilities\": $('Get Final Session Summary').item.json.critical_count,\n  \"high_vulnerabilities\": $('Get Final Session Summary').item.json.high_count,\n  \"attack_chains_identified\": $('Get Final Session Summary').item.json.attack_chain_count,\n  \"overall_risk\": $('Get Final Session Summary').item.json.report_summary.overall_risk,\n  \"report_paths\": {\n    \"markdown\": $('Save Report to Filesystem').item.json.markdown_path,\n    \"json\": $('Save Report to Filesystem').item.json.json_path\n  },\n  \"report_id\": $('Save Report to Filesystem').item.json.report_id,\n  \"message\": \"Red team assessment completed successfully. Report generated.\"\n} }}",
+        "responseBody": "={{ {\n  \"status\": \"completed\",\n  \"session_id\": $('Webhook: Start Phase 4').item.json.body.session_id,\n  \"target\": $('Get Final Session Summary').item.json.target,\n  \"duration_minutes\": Math.round($('Get Final Session Summary').item.json.duration_minutes),\n  \"critical_vulnerabilities\": $('Get Final Session Summary').item.json.critical_count,\n  \"high_vulnerabilities\": $('Get Final Session Summary').item.json.high_count,\n  \"attack_chains_identified\": $('Get Final Session Summary').item.json.attack_chain_count,\n  \"overall_risk\": $('Get Final Session Summary').item.json.report_summary.overall_risk,\n  \"report_paths\": {\n    \"markdown\": $('Save Report to Filesystem').item.json.markdown_path,\n    \"json\": $('Save Report to Filesystem').item.json.json_path\n  },\n  \"report_id\": $('Save Report to Filesystem').item.json.report_id,\n  \"message\": \"Red team assessment completed successfully. Report generated.\"\n} }}",
         "options": {}
       },
       "id": "respond-success",

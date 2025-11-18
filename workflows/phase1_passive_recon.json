@@ -18,7 +18,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT rs.*, sd.stealth_level, sd.rate_limit_per_sec, sd.scope_name\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.session_id }}'\nAND rs.status IN ('initiated', 'phase1_started')",
+        "query": "SELECT rs.*, sd.stealth_level, sd.rate_limit_per_sec, sd.scope_name\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.body.session_id }}'\nAND rs.status IN ('initiated', 'phase1_started')",
         "options": {}
       },
       "id": "load-session",
@@ -53,7 +53,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ {\"error\": \"Session not found or invalid status\", \"session_id\": $('Webhook: Start Phase 1').item.json.session_id} }}",
+        "responseBody": "={{ {\"error\": \"Session not found or invalid status\", \"session_id\": $('Webhook: Start Phase 1').item.json.body.session_id} }}",
         "options": {
           "responseCode": 404
         }
@@ -67,7 +67,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase1_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.session_id }}'",
+        "query": "UPDATE recon_sessions SET status = 'phase1_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase1",
@@ -85,7 +85,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.session_id }}',\n  'phase1',\n  'passive_recon_started',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_started',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase1-start",
@@ -102,7 +102,7 @@
     },
     {
       "parameters": {
-        "command": "subfinder -d {{ $('Load Session Details').item.json.target }} -silent -all -recursive -o /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.session_id }}.txt && cat /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.session_id }}.txt"
+        "command": "subfinder -d {{ $('Load Session Details').item.json.target }} -silent -all -recursive -o /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt && cat /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt"
       },
       "id": "subfinder-enum",
       "name": "Subfinder: Subdomain Enumeration",
@@ -220,7 +220,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse and deduplicate subdomains from all sources\nconst subdomains = new Set();\nconst sessionId = $('Webhook: Start Phase 1').item.json.session_id;\nconst target = $('Load Session Details').item.json.target;\n\n// Parse Subfinder output (line-separated)\nconst subfinderData = $('Subfinder: Subdomain Enumeration').first().json.stdout || '';\nsubfinderData.split('\\n').forEach(line => {\n  const subdomain = line.trim();\n  if (subdomain && subdomain.includes('.')) {\n    subdomains.add(subdomain.toLowerCase());\n  }\n});\n\n// Parse Amass output (line-separated)\nconst amassData = $('Amass: Passive DNS Enumeration').first().json.stdout || '';\namassData.split('\\n').forEach(line => {\n  const subdomain = line.trim();\n  if (subdomain && subdomain.includes('.')) {\n    subdomains.add(subdomain.toLowerCase());\n  }\n});\n\n// Parse crt.sh output (JSON array)\ntry {\n  const crtshData = $('crt.sh: Certificate Transparency').first().json;\n  if (Array.isArray(crtshData)) {\n    crtshData.forEach(entry => {\n      if (entry.name_value) {\n        entry.name_value.split('\\n').forEach(domain => {\n          const subdomain = domain.trim().replace('*.', '');\n          if (subdomain && subdomain.includes('.')) {\n            subdomains.add(subdomain.toLowerCase());\n          }\n        });\n      }\n    });\n  }\n} catch (e) {\n  console.log('crt.sh parsing error:', e.message);\n}\n\n// Convert to array and create output items\nconst results = Array.from(subdomains).map(subdomain => ({\n  session_id: sessionId,\n  target: target,\n  subdomain: subdomain,\n  source: 'passive_enum',\n  discovered_at: new Date().toISOString()\n}));\n\nconsole.log(`Found ${results.length} unique subdomains`);\n\nreturn results.map(item => ({json: item}));"
+        "jsCode": "// Parse and deduplicate subdomains from all sources\nconst subdomains = new Set();\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\n// Parse Subfinder output (line-separated)\nconst subfinderData = $('Subfinder: Subdomain Enumeration').first().json.stdout || '';\nsubfinderData.split('\\n').forEach(line => {\n  const subdomain = line.trim();\n  if (subdomain && subdomain.includes('.')) {\n    subdomains.add(subdomain.toLowerCase());\n  }\n});\n\n// Parse Amass output (line-separated)\nconst amassData = $('Amass: Passive DNS Enumeration').first().json.stdout || '';\namassData.split('\\n').forEach(line => {\n  const subdomain = line.trim();\n  if (subdomain && subdomain.includes('.')) {\n    subdomains.add(subdomain.toLowerCase());\n  }\n});\n\n// Parse crt.sh output (JSON array)\ntry {\n  const crtshData = $('crt.sh: Certificate Transparency').first().json;\n  if (Array.isArray(crtshData)) {\n    crtshData.forEach(entry => {\n      if (entry.name_value) {\n        entry.name_value.split('\\n').forEach(domain => {\n          const subdomain = domain.trim().replace('*.', '');\n          if (subdomain && subdomain.includes('.')) {\n            subdomains.add(subdomain.toLowerCase());\n          }\n        });\n      }\n    });\n  }\n} catch (e) {\n  console.log('crt.sh parsing error:', e.message);\n}\n\n// Convert to array and create output items\nconst results = Array.from(subdomains).map(subdomain => ({\n  session_id: sessionId,\n  target: target,\n  subdomain: subdomain,\n  source: 'passive_enum',\n  discovered_at: new Date().toISOString()\n}));\n\nconsole.log(`Found ${results.length} unique subdomains`);\n\nreturn results.map(item => ({json: item}));"
       },
       "id": "parse-subdomains",
       "name": "Parse & Deduplicate Subdomains",
@@ -248,7 +248,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse Shodan API response and store in passive_intel\nconst sessionId = $('Webhook: Start Phase 1').item.json.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const shodanData = $('Shodan: Domain Lookup').first().json;\n  \n  if (!shodanData || shodanData.error) {\n    console.log('Shodan lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [];\n  \n  // Parse subdomain data\n  if (shodanData.subdomains && Array.isArray(shodanData.subdomains)) {\n    shodanData.subdomains.forEach(subdomain => {\n      results.push({\n        session_id: sessionId,\n        target: target,\n        intel_type: 'shodan_subdomain',\n        source: 'shodan',\n        data: { subdomain: subdomain },\n        discovered_at: new Date().toISOString()\n      });\n    });\n  }\n  \n  // Parse domain info\n  if (shodanData.domain) {\n    results.push({\n      session_id: sessionId,\n      target: target,\n      intel_type: 'shodan_domain_info',\n      source: 'shodan',\n      data: shodanData,\n      discovered_at: new Date().toISOString()\n    });\n  }\n  \n  console.log(`Parsed ${results.length} Shodan intel items`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Shodan parsing error:', e.message);\n  return [];\n}"
+        "jsCode": "// Parse Shodan API response and store in passive_intel\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const shodanData = $('Shodan: Domain Lookup').first().json;\n  \n  if (!shodanData || shodanData.error) {\n    console.log('Shodan lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [];\n  \n  // Parse subdomain data\n  if (shodanData.subdomains && Array.isArray(shodanData.subdomains)) {\n    shodanData.subdomains.forEach(subdomain => {\n      results.push({\n        session_id: sessionId,\n        target: target,\n        intel_type: 'shodan_subdomain',\n        source: 'shodan',\n        data: { subdomain: subdomain },\n        discovered_at: new Date().toISOString()\n      });\n    });\n  }\n  \n  // Parse domain info\n  if (shodanData.domain) {\n    results.push({\n      session_id: sessionId,\n      target: target,\n      intel_type: 'shodan_domain_info',\n      source: 'shodan',\n      data: shodanData,\n      discovered_at: new Date().toISOString()\n    });\n  }\n  \n  console.log(`Parsed ${results.length} Shodan intel items`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Shodan parsing error:', e.message);\n  return [];\n}"
       },
       "id": "parse-shodan",
       "name": "Parse Shodan Results",
@@ -276,7 +276,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse Censys API response\nconst sessionId = $('Webhook: Start Phase 1').item.json.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const censysData = $('Censys: Host Search').first().json;\n  \n  if (!censysData || censysData.error || !censysData.result) {\n    console.log('Censys lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [];\n  \n  if (censysData.result.hits && Array.isArray(censysData.result.hits)) {\n    censysData.result.hits.forEach(hit => {\n      results.push({\n        session_id: sessionId,\n        target: target,\n        intel_type: 'censys_host',\n        source: 'censys',\n        data: hit,\n        discovered_at: new Date().toISOString()\n      });\n    });\n  }\n  \n  console.log(`Parsed ${results.length} Censys intel items`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Censys parsing error:', e.message);\n  return [];\n}"
+        "jsCode": "// Parse Censys API response\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const censysData = $('Censys: Host Search').first().json;\n  \n  if (!censysData || censysData.error || !censysData.result) {\n    console.log('Censys lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [];\n  \n  if (censysData.result.hits && Array.isArray(censysData.result.hits)) {\n    censysData.result.hits.forEach(hit => {\n      results.push({\n        session_id: sessionId,\n        target: target,\n        intel_type: 'censys_host',\n        source: 'censys',\n        data: hit,\n        discovered_at: new Date().toISOString()\n      });\n    });\n  }\n  \n  console.log(`Parsed ${results.length} Censys intel items`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Censys parsing error:', e.message);\n  return [];\n}"
       },
       "id": "parse-censys",
       "name": "Parse Censys Results",
@@ -304,7 +304,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse VirusTotal API response\nconst sessionId = $('Webhook: Start Phase 1').item.json.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const vtData = $('VirusTotal: Domain Reputation').first().json;\n  \n  if (!vtData || vtData.error || !vtData.data) {\n    console.log('VirusTotal lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [{\n    session_id: sessionId,\n    target: target,\n    intel_type: 'virustotal_domain',\n    source: 'virustotal',\n    data: {\n      reputation: vtData.data.attributes?.reputation || 0,\n      last_analysis_stats: vtData.data.attributes?.last_analysis_stats || {},\n      categories: vtData.data.attributes?.categories || {},\n      creation_date: vtData.data.attributes?.creation_date,\n      last_modification_date: vtData.data.attributes?.last_modification_date\n    },\n    discovered_at: new Date().toISOString()\n  }];\n  \n  console.log(`Parsed VirusTotal domain reputation`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('VirusTotal parsing error:', e.message);\n  return [];\n}"
+        "jsCode": "// Parse VirusTotal API response\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const vtData = $('VirusTotal: Domain Reputation').first().json;\n  \n  if (!vtData || vtData.error || !vtData.data) {\n    console.log('VirusTotal lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [{\n    session_id: sessionId,\n    target: target,\n    intel_type: 'virustotal_domain',\n    source: 'virustotal',\n    data: {\n      reputation: vtData.data.attributes?.reputation || 0,\n      last_analysis_stats: vtData.data.attributes?.last_analysis_stats || {},\n      categories: vtData.data.attributes?.categories || {},\n      creation_date: vtData.data.attributes?.creation_date,\n      last_modification_date: vtData.data.attributes?.last_modification_date\n    },\n    discovered_at: new Date().toISOString()\n  }];\n  \n  console.log(`Parsed VirusTotal domain reputation`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('VirusTotal parsing error:', e.message);\n  return [];\n}"
       },
       "id": "parse-virustotal",
       "name": "Parse VirusTotal Results",
@@ -332,7 +332,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse Whois output for ASN and network information\nconst sessionId = $('Webhook: Start Phase 1').item.json.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const whoisData = $('Whois: ASN & Network Info').first().json.stdout || '';\n  \n  if (!whoisData || whoisData.trim() === '') {\n    console.log('Whois lookup failed or returned no data');\n    return [];\n  }\n  \n  // Parse whois output\n  const lines = whoisData.split('\\n');\n  const parsed = {};\n  \n  lines.forEach(line => {\n    const match = line.match(/^([^:]+):\\s*(.+)$/);\n    if (match) {\n      const key = match[1].trim().toLowerCase().replace(/\\s+/g, '_');\n      const value = match[2].trim();\n      parsed[key] = value;\n    }\n  });\n  \n  const results = [{\n    session_id: sessionId,\n    target: target,\n    intel_type: 'whois_network',\n    source: 'whois',\n    data: parsed,\n    discovered_at: new Date().toISOString()\n  }];\n  \n  console.log(`Parsed Whois network information`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Whois parsing error:', e.message);\n  return [];\n}"
+        "jsCode": "// Parse Whois output for ASN and network information\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const whoisData = $('Whois: ASN & Network Info').first().json.stdout || '';\n  \n  if (!whoisData || whoisData.trim() === '') {\n    console.log('Whois lookup failed or returned no data');\n    return [];\n  }\n  \n  // Parse whois output\n  const lines = whoisData.split('\\n');\n  const parsed = {};\n  \n  lines.forEach(line => {\n    const match = line.match(/^([^:]+):\\s*(.+)$/);\n    if (match) {\n      const key = match[1].trim().toLowerCase().replace(/\\s+/g, '_');\n      const value = match[2].trim();\n      parsed[key] = value;\n    }\n  });\n  \n  const results = [{\n    session_id: sessionId,\n    target: target,\n    intel_type: 'whois_network',\n    source: 'whois',\n    data: parsed,\n    discovered_at: new Date().toISOString()\n  }];\n  \n  console.log(`Parsed Whois network information`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Whois parsing error:', e.message);\n  return [];\n}"
       },
       "id": "parse-whois",
       "name": "Parse Whois Results",
@@ -372,7 +372,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase1_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.session_id }}'",
+        "query": "UPDATE recon_sessions SET status = 'phase1_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase1-complete",
@@ -390,7 +390,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.session_id }}',\n  'phase1',\n  'passive_recon_completed',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_completed',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase1-complete",
@@ -408,7 +408,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT COUNT(*) as subdomain_count FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.session_id }}'",
+        "query": "SELECT COUNT(*) as subdomain_count FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "count-subdomains",
@@ -429,7 +429,7 @@
         "url": "http://n8n-recon:5678/webhook/phase2-active-recon",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"session_id\": $('Webhook: Start Phase 1').item.json.session_id, \"target\": $('Load Session Details').item.json.target, \"subdomain_count\": $('Count Discovered Subdomains').item.json.subdomain_count, \"source\": \"phase1\" } }}",
+        "jsonBody": "={{ { \"session_id\": $('Webhook: Start Phase 1').item.json.body.session_id, \"target\": $('Load Session Details').item.json.target, \"subdomain_count\": $('Count Discovered Subdomains').item.json.subdomain_count, \"source\": \"phase1\" } }}",
         "options": {
           "timeout": 300000
         }
@@ -445,7 +445,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ {\n  \"status\": \"phase1_completed\",\n  \"session_id\": $('Webhook: Start Phase 1').item.json.session_id,\n  \"target\": $('Load Session Details').item.json.target,\n  \"subdomains_discovered\": $('Count Discovered Subdomains').item.json.subdomain_count,\n  \"phase2_triggered\": $('Trigger Phase 2').item.json.statusCode === 200,\n  \"message\": \"Passive reconnaissance completed successfully\"\n} }}",
+        "responseBody": "={{ {\n  \"status\": \"phase1_completed\",\n  \"session_id\": $('Webhook: Start Phase 1').item.json.body.session_id,\n  \"target\": $('Load Session Details').item.json.target,\n  \"subdomains_discovered\": $('Count Discovered Subdomains').item.json.subdomain_count,\n  \"phase2_triggered\": $('Trigger Phase 2').item.json.statusCode === 200,\n  \"message\": \"Passive reconnaissance completed successfully\"\n} }}",
         "options": {}
       },
       "id": "respond-success",

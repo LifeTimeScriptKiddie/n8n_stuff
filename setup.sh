@@ -351,6 +351,49 @@ deploy_containers() {
 }
 
 # ============================================================================
+# Apply Database Migrations
+# ============================================================================
+
+apply_migrations() {
+    print_header "Applying Database Migrations"
+
+    # Check if migrations directory exists
+    if [ ! -d "migrations" ]; then
+        print_info "No migrations directory found - skipping migrations"
+        echo ""
+        return
+    fi
+
+    # Count migration files
+    migration_count=$(find migrations -name "*.sql" -type f | wc -l | tr -d ' ')
+
+    if [ "$migration_count" -eq 0 ]; then
+        print_info "No migration files found - skipping migrations"
+        echo ""
+        return
+    fi
+
+    print_info "Found $migration_count migration file(s)"
+    echo ""
+
+    # Apply each migration in order
+    for migration in migrations/*.sql; do
+        if [ -f "$migration" ]; then
+            migration_name=$(basename "$migration")
+            print_info "Applying migration: $migration_name"
+
+            if docker compose exec -T postgres psql -U recon_user -d recon_hub < "$migration" 2>&1 | grep -q "ERROR"; then
+                print_warning "Migration $migration_name had errors (may be already applied)"
+            else
+                print_success "Migration $migration_name applied successfully"
+            fi
+        fi
+    done
+
+    echo ""
+}
+
+# ============================================================================
 # Verification
 # ============================================================================
 
@@ -485,6 +528,8 @@ print_final_info() {
     echo -e "  ✓ web_technologies      ✓ nuclei_results"
     echo -e "  ✓ sqli_results          ✓ recon_sessions"
     echo ""
+    echo -e "  ${MAGENTA}Note:${NC} Database migrations from migrations/ automatically applied"
+    echo ""
 
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${RED}  ⚠️  CRITICAL SECURITY WARNINGS${NC}"
@@ -531,6 +576,7 @@ main() {
     create_credentials_file
     build_containers
     deploy_containers
+    apply_migrations
     verify_installation
     verify_tools
     print_final_info

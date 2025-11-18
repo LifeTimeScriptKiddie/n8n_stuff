@@ -18,7 +18,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT rs.*, sd.stealth_level, sd.rate_limit_per_sec, sd.max_concurrent_scans\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.session_id }}'\nAND rs.status = 'phase1_completed'",
+        "query": "SELECT rs.*, sd.stealth_level, sd.rate_limit_per_sec, sd.max_concurrent_scans\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.body.session_id }}'\nAND rs.status = 'phase1_completed'",
         "options": {}
       },
       "id": "load-session",
@@ -38,7 +38,7 @@
         "conditions": {
           "boolean": [
             {
-              "value1": "={{ $json.session_id }}",
+              "value1": "={{ $json.body.session_id }}",
               "operation": "exists"
             }
           ]
@@ -53,7 +53,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ {\"error\": \"Session not ready for Phase 2\", \"session_id\": $('Webhook: Start Phase 2').item.json.session_id} }}",
+        "responseBody": "={{ {\"error\": \"Session not ready for Phase 2\", \"session_id\": $('Webhook: Start Phase 2').item.json.body.session_id} }}",
         "options": {
           "responseCode": 400
         }
@@ -67,7 +67,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase2_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.session_id }}'",
+        "query": "UPDATE recon_sessions SET status = 'phase2_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase2",
@@ -85,7 +85,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 2').item.json.session_id }}',\n  'phase2',\n  'active_recon_started',\n  '{\"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}',\n  'phase2',\n  'active_recon_started',\n  '{\"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase2-start",
@@ -103,7 +103,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT DISTINCT subdomain FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.session_id }}' ORDER BY subdomain",
+        "query": "SELECT DISTINCT subdomain FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}' ORDER BY subdomain",
         "options": {}
       },
       "id": "load-subdomains",
@@ -120,7 +120,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Create subdomain list file for httpx\nconst subdomains = $input.all().map(item => item.json.subdomain);\nconst sessionId = $('Webhook: Start Phase 2').item.json.session_id;\nconst filePath = `/tmp/subdomains_${sessionId}.txt`;\n\nconst fs = require('fs');\nfs.writeFileSync(filePath, subdomains.join('\\n'));\n\nconsole.log(`Created subdomain list with ${subdomains.length} entries at ${filePath}`);\n\nreturn [{\n  json: {\n    subdomain_file: filePath,\n    subdomain_count: subdomains.length,\n    session_id: sessionId\n  }\n}];"
+        "jsCode": "// Create subdomain list file for httpx\nconst subdomains = $input.all().map(item => item.json.subdomain);\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst filePath = `/tmp/subdomains_${sessionId}.txt`;\n\nconst fs = require('fs');\nfs.writeFileSync(filePath, subdomains.join('\\n'));\n\nconsole.log(`Created subdomain list with ${subdomains.length} entries at ${filePath}`);\n\nreturn [{\n  json: {\n    subdomain_file: filePath,\n    subdomain_count: subdomains.length,\n    session_id: sessionId\n  }\n}];"
       },
       "id": "create-subdomain-file",
       "name": "Create Subdomain List File",
@@ -130,7 +130,7 @@
     },
     {
       "parameters": {
-        "command": "httpx -l {{ $json.subdomain_file }} -silent -json -status-code -title -tech-detect -content-length -web-server -ip -cname -cdn -probe -threads 50 -rate-limit {{ $('Load Session Details').item.json.rate_limit_per_sec }} -o /tmp/httpx_{{ $json.session_id }}.json && cat /tmp/httpx_{{ $json.session_id }}.json"
+        "command": "httpx -l {{ $json.subdomain_file }} -silent -json -status-code -title -tech-detect -content-length -web-server -ip -cname -cdn -probe -threads 50 -rate-limit {{ $('Load Session Details').item.json.rate_limit_per_sec }} -o /tmp/httpx_{{ $json.body.session_id }}.json && cat /tmp/httpx_{{ $json.body.session_id }}.json"
       },
       "id": "httpx-probe",
       "name": "httpx: HTTP/HTTPS Probing",
@@ -141,7 +141,7 @@
     },
     {
       "parameters": {
-        "command": "naabu -l {{ $json.subdomain_file }} -silent -json -top-ports 1000 -rate {{ $('Load Session Details').item.json.rate_limit_per_sec }}00 -o /tmp/naabu_{{ $json.session_id }}.json && cat /tmp/naabu_{{ $json.session_id }}.json"
+        "command": "naabu -l {{ $json.subdomain_file }} -silent -json -top-ports 1000 -rate {{ $('Load Session Details').item.json.rate_limit_per_sec }}00 -o /tmp/naabu_{{ $json.body.session_id }}.json && cat /tmp/naabu_{{ $json.body.session_id }}.json"
       },
       "id": "naabu-portscan",
       "name": "naabu: Fast Port Scanning",
@@ -152,7 +152,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse httpx JSON output line by line\nconst sessionId = $('Webhook: Start Phase 2').item.json.session_id;\nconst httpxOutput = $input.first().json.stdout || '';\n\nconst results = [];\nconst lines = httpxOutput.split('\\n');\n\nlines.forEach(line => {\n  if (!line.trim()) return;\n  \n  try {\n    const data = JSON.parse(line);\n    \n    results.push({\n      session_id: sessionId,\n      host: data.host || data.url,\n      url: data.url,\n      status_code: data.status_code || data['status-code'],\n      title: data.title,\n      server: data['web-server'] || data.webserver,\n      content_length: data['content-length'],\n      technologies: data.tech || data.technologies || [],\n      ip: data.ip,\n      cname: data.cname,\n      cdn: data.cdn,\n      scheme: data.scheme,\n      port: data.port,\n      response_time: data['response-time'] || null,\n      discovered_at: new Date().toISOString()\n    });\n  } catch (e) {\n    console.log('Failed to parse httpx line:', line.substring(0, 100));\n  }\n});\n\nconsole.log(`Parsed ${results.length} live HTTP services`);\nreturn results.map(item => ({json: item}));"
+        "jsCode": "// Parse httpx JSON output line by line\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst httpxOutput = $input.first().json.stdout || '';\n\nconst results = [];\nconst lines = httpxOutput.split('\\n');\n\nlines.forEach(line => {\n  if (!line.trim()) return;\n  \n  try {\n    const data = JSON.parse(line);\n    \n    results.push({\n      session_id: sessionId,\n      host: data.host || data.url,\n      url: data.url,\n      status_code: data.status_code || data['status-code'],\n      title: data.title,\n      server: data['web-server'] || data.webserver,\n      content_length: data['content-length'],\n      technologies: data.tech || data.technologies || [],\n      ip: data.ip,\n      cname: data.cname,\n      cdn: data.cdn,\n      scheme: data.scheme,\n      port: data.port,\n      response_time: data['response-time'] || null,\n      discovered_at: new Date().toISOString()\n    });\n  } catch (e) {\n    console.log('Failed to parse httpx line:', line.substring(0, 100));\n  }\n});\n\nconsole.log(`Parsed ${results.length} live HTTP services`);\nreturn results.map(item => ({json: item}));"
       },
       "id": "parse-httpx",
       "name": "Parse httpx Results",
@@ -163,7 +163,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=INSERT INTO http_services (session_id, host, url, status_code, title, server, content_length, technologies, ip, cname, cdn, scheme, port, response_time, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.url }}',\n  {{ $json.status_code }},\n  '{{ $json.title }}',\n  '{{ $json.server }}',\n  {{ $json.content_length }},\n  '{{ JSON.stringify($json.technologies) }}'::jsonb,\n  '{{ $json.ip }}',\n  '{{ $json.cname }}',\n  '{{ $json.cdn }}',\n  '{{ $json.scheme }}',\n  {{ $json.port }},\n  {{ $json.response_time }},\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, url) DO UPDATE SET\n  status_code = EXCLUDED.status_code,\n  title = EXCLUDED.title,\n  updated_at = NOW()",
+        "query": "=INSERT INTO http_services (session_id, host, url, status_code, title, server, content_length, technologies, ip, cname, cdn, scheme, port, response_time, discovered_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.url }}',\n  {{ $json.status_code }},\n  '{{ $json.title }}',\n  '{{ $json.server }}',\n  {{ $json.content_length }},\n  '{{ JSON.stringify($json.technologies) }}'::jsonb,\n  '{{ $json.ip }}',\n  '{{ $json.cname }}',\n  '{{ $json.cdn }}',\n  '{{ $json.scheme }}',\n  {{ $json.port }},\n  {{ $json.response_time }},\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, url) DO UPDATE SET\n  status_code = EXCLUDED.status_code,\n  title = EXCLUDED.title,\n  updated_at = NOW()",
         "options": {}
       },
       "id": "store-http-services",
@@ -180,7 +180,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse naabu JSON output line by line\nconst sessionId = $('Webhook: Start Phase 2').item.json.session_id;\nconst naabuOutput = $input.first().json.stdout || '';\n\nconst results = [];\nconst lines = naabuOutput.split('\\n');\n\nlines.forEach(line => {\n  if (!line.trim()) return;\n  \n  try {\n    const data = JSON.parse(line);\n    \n    results.push({\n      session_id: sessionId,\n      host: data.host || data.ip,\n      ip: data.ip,\n      port: data.port,\n      protocol: data.protocol || 'tcp',\n      discovered_at: new Date().toISOString()\n    });\n  } catch (e) {\n    console.log('Failed to parse naabu line:', line.substring(0, 100));\n  }\n});\n\nconsole.log(`Parsed ${results.length} open ports`);\nreturn results.map(item => ({json: item}));"
+        "jsCode": "// Parse naabu JSON output line by line\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst naabuOutput = $input.first().json.stdout || '';\n\nconst results = [];\nconst lines = naabuOutput.split('\\n');\n\nlines.forEach(line => {\n  if (!line.trim()) return;\n  \n  try {\n    const data = JSON.parse(line);\n    \n    results.push({\n      session_id: sessionId,\n      host: data.host || data.ip,\n      ip: data.ip,\n      port: data.port,\n      protocol: data.protocol || 'tcp',\n      discovered_at: new Date().toISOString()\n    });\n  } catch (e) {\n    console.log('Failed to parse naabu line:', line.substring(0, 100));\n  }\n});\n\nconsole.log(`Parsed ${results.length} open ports`);\nreturn results.map(item => ({json: item}));"
       },
       "id": "parse-naabu",
       "name": "Parse naabu Results",
@@ -191,7 +191,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=INSERT INTO port_scan_results (session_id, host, ip, port, protocol, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.ip }}',\n  {{ $json.port }},\n  '{{ $json.protocol }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, host, port) DO NOTHING",
+        "query": "=INSERT INTO port_scan_results (session_id, host, ip, port, protocol, discovered_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.ip }}',\n  {{ $json.port }},\n  '{{ $json.protocol }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, host, port) DO NOTHING",
         "options": {}
       },
       "id": "store-port-results",
@@ -209,7 +209,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT DISTINCT url FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.session_id }}' AND status_code BETWEEN 200 AND 399 LIMIT 100",
+        "query": "SELECT DISTINCT url FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}' AND status_code BETWEEN 200 AND 399 LIMIT 100",
         "options": {}
       },
       "id": "load-live-urls",
@@ -226,7 +226,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Create URL list file for gowitness\nconst urls = $input.all().map(item => item.json.url);\nconst sessionId = $('Webhook: Start Phase 2').item.json.session_id;\nconst urlFile = `/tmp/urls_${sessionId}.txt`;\nconst screenshotDir = `/tmp/screenshots_${sessionId}`;\n\nconst fs = require('fs');\nfs.writeFileSync(urlFile, urls.join('\\n'));\n\n// Create screenshot directory\nconst { execSync } = require('child_process');\ntry {\n  execSync(`mkdir -p ${screenshotDir}`);\n} catch (e) {\n  console.log('Failed to create screenshot directory:', e.message);\n}\n\nconsole.log(`Created URL list with ${urls.length} entries`);\n\nreturn [{\n  json: {\n    url_file: urlFile,\n    screenshot_dir: screenshotDir,\n    url_count: urls.length,\n    session_id: sessionId\n  }\n}];"
+        "jsCode": "// Create URL list file for gowitness\nconst urls = $input.all().map(item => item.json.url);\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst urlFile = `/tmp/urls_${sessionId}.txt`;\nconst screenshotDir = `/tmp/screenshots_${sessionId}`;\n\nconst fs = require('fs');\nfs.writeFileSync(urlFile, urls.join('\\n'));\n\n// Create screenshot directory\nconst { execSync } = require('child_process');\ntry {\n  execSync(`mkdir -p ${screenshotDir}`);\n} catch (e) {\n  console.log('Failed to create screenshot directory:', e.message);\n}\n\nconsole.log(`Created URL list with ${urls.length} entries`);\n\nreturn [{\n  json: {\n    url_file: urlFile,\n    screenshot_dir: screenshotDir,\n    url_count: urls.length,\n    session_id: sessionId\n  }\n}];"
       },
       "id": "create-url-file",
       "name": "Create URL List for Screenshots",
@@ -248,7 +248,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Record screenshot capture results\nconst sessionId = $('Webhook: Start Phase 2').item.json.session_id;\nconst screenshotDir = $('Create URL List for Screenshots').item.json.screenshot_dir;\nconst output = $input.first().json.stdout || '';\n\n// Count screenshots captured\nconst lines = output.split('\\n');\nconst screenshotFiles = lines.filter(line => line.includes('.png'));\n\nconsole.log(`Captured ${screenshotFiles.length} screenshots`);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    screenshot_dir: screenshotDir,\n    screenshot_count: screenshotFiles.length,\n    captured_at: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// Record screenshot capture results\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst screenshotDir = $('Create URL List for Screenshots').item.json.screenshot_dir;\nconst output = $input.first().json.stdout || '';\n\n// Count screenshots captured\nconst lines = output.split('\\n');\nconst screenshotFiles = lines.filter(line => line.includes('.png'));\n\nconsole.log(`Captured ${screenshotFiles.length} screenshots`);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    screenshot_dir: screenshotDir,\n    screenshot_count: screenshotFiles.length,\n    captured_at: new Date().toISOString()\n  }\n}];"
       },
       "id": "parse-screenshots",
       "name": "Parse Screenshot Results",
@@ -259,7 +259,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=INSERT INTO screenshots (session_id, screenshot_path, screenshot_count, captured_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.screenshot_dir }}',\n  {{ $json.screenshot_count }},\n  '{{ $json.captured_at }}',\n  NOW()\n)",
+        "query": "=INSERT INTO screenshots (session_id, screenshot_path, screenshot_count, captured_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.screenshot_dir }}',\n  {{ $json.screenshot_count }},\n  '{{ $json.captured_at }}',\n  NOW()\n)",
         "options": {}
       },
       "id": "store-screenshot-info",
@@ -276,7 +276,7 @@
     },
     {
       "parameters": {
-        "command": "katana -u {{ $('Create URL List for Screenshots').item.json.url_file }} -jc -silent -known-files all -automatic-form-fill -field-scope {{ $('Load Session Details').item.json.scope_name }} -rate-limit {{ $('Load Session Details').item.json.rate_limit_per_sec }} -o /tmp/katana_{{ $('Webhook: Start Phase 2').item.json.session_id }}.txt && cat /tmp/katana_{{ $('Webhook: Start Phase 2').item.json.session_id }}.txt | head -1000"
+        "command": "katana -u {{ $('Create URL List for Screenshots').item.json.url_file }} -jc -silent -known-files all -automatic-form-fill -field-scope {{ $('Load Session Details').item.json.scope_name }} -rate-limit {{ $('Load Session Details').item.json.rate_limit_per_sec }} -o /tmp/katana_{{ $('Webhook: Start Phase 2').item.json.body.session_id }}.txt && cat /tmp/katana_{{ $('Webhook: Start Phase 2').item.json.body.session_id }}.txt | head -1000"
       },
       "id": "katana-crawl",
       "name": "katana: JavaScript & Endpoint Discovery",
@@ -288,7 +288,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse katana crawling output\nconst sessionId = $('Webhook: Start Phase 2').item.json.session_id;\nconst katanaOutput = $input.first().json.stdout || '';\n\nconst endpoints = new Set();\nconst jsFiles = new Set();\n\nkatanaOutput.split('\\n').forEach(line => {\n  const url = line.trim();\n  if (!url) return;\n  \n  if (url.endsWith('.js')) {\n    jsFiles.add(url);\n  } else {\n    endpoints.add(url);\n  }\n});\n\nconsole.log(`Discovered ${endpoints.size} endpoints and ${jsFiles.size} JS files`);\n\nconst results = [];\n\nendpoints.forEach(endpoint => {\n  results.push({\n    session_id: sessionId,\n    endpoint: endpoint,\n    method: 'GET',\n    source: 'katana',\n    discovered_at: new Date().toISOString()\n  });\n});\n\nreturn results.slice(0, 500).map(item => ({json: item}));"
+        "jsCode": "// Parse katana crawling output\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst katanaOutput = $input.first().json.stdout || '';\n\nconst endpoints = new Set();\nconst jsFiles = new Set();\n\nkatanaOutput.split('\\n').forEach(line => {\n  const url = line.trim();\n  if (!url) return;\n  \n  if (url.endsWith('.js')) {\n    jsFiles.add(url);\n  } else {\n    endpoints.add(url);\n  }\n});\n\nconsole.log(`Discovered ${endpoints.size} endpoints and ${jsFiles.size} JS files`);\n\nconst results = [];\n\nendpoints.forEach(endpoint => {\n  results.push({\n    session_id: sessionId,\n    endpoint: endpoint,\n    method: 'GET',\n    source: 'katana',\n    discovered_at: new Date().toISOString()\n  });\n});\n\nreturn results.slice(0, 500).map(item => ({json: item}));"
       },
       "id": "parse-katana",
       "name": "Parse katana Endpoints",
@@ -299,7 +299,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=INSERT INTO api_endpoints (session_id, endpoint, method, source, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.endpoint }}',\n  '{{ $json.method }}',\n  '{{ $json.source }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, endpoint) DO NOTHING",
+        "query": "=INSERT INTO api_endpoints (session_id, endpoint, method, source, discovered_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.endpoint }}',\n  '{{ $json.method }}',\n  '{{ $json.source }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, endpoint) DO NOTHING",
         "options": {}
       },
       "id": "store-endpoints",
@@ -328,7 +328,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase2_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.session_id }}'",
+        "query": "UPDATE recon_sessions SET status = 'phase2_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase2-complete",
@@ -346,7 +346,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 2').item.json.session_id }}',\n  'phase2',\n  'active_recon_completed',\n  '{\"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}',\n  'phase2',\n  'active_recon_completed',\n  '{\"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase2-complete",
@@ -364,7 +364,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT \n  (SELECT COUNT(*) FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.session_id }}') as http_count,\n  (SELECT COUNT(*) FROM port_scan_results WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.session_id }}') as port_count,\n  (SELECT COUNT(*) FROM api_endpoints WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.session_id }}') as endpoint_count",
+        "query": "SELECT \n  (SELECT COUNT(*) FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}') as http_count,\n  (SELECT COUNT(*) FROM port_scan_results WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}') as port_count,\n  (SELECT COUNT(*) FROM api_endpoints WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}') as endpoint_count",
         "options": {}
       },
       "id": "count-results",
@@ -385,7 +385,7 @@
         "url": "http://n8n-recon:5678/webhook/phase3-vuln-assessment",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"session_id\": $('Webhook: Start Phase 2').item.json.session_id, \"target\": $('Load Session Details').item.json.target, \"http_count\": $('Count Phase 2 Results').item.json.http_count, \"port_count\": $('Count Phase 2 Results').item.json.port_count, \"source\": \"phase2\" } }}",
+        "jsonBody": "={{ { \"session_id\": $('Webhook: Start Phase 2').item.json.body.session_id, \"target\": $('Load Session Details').item.json.target, \"http_count\": $('Count Phase 2 Results').item.json.http_count, \"port_count\": $('Count Phase 2 Results').item.json.port_count, \"source\": \"phase2\" } }}",
         "options": {
           "timeout": 300000
         }
@@ -401,7 +401,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ {\n  \"status\": \"phase2_completed\",\n  \"session_id\": $('Webhook: Start Phase 2').item.json.session_id,\n  \"http_services\": $('Count Phase 2 Results').item.json.http_count,\n  \"open_ports\": $('Count Phase 2 Results').item.json.port_count,\n  \"endpoints\": $('Count Phase 2 Results').item.json.endpoint_count,\n  \"phase3_triggered\": $('Trigger Phase 3').item.json.statusCode === 200,\n  \"message\": \"Active reconnaissance completed successfully\"\n} }}",
+        "responseBody": "={{ {\n  \"status\": \"phase2_completed\",\n  \"session_id\": $('Webhook: Start Phase 2').item.json.body.session_id,\n  \"http_services\": $('Count Phase 2 Results').item.json.http_count,\n  \"open_ports\": $('Count Phase 2 Results').item.json.port_count,\n  \"endpoints\": $('Count Phase 2 Results').item.json.endpoint_count,\n  \"phase3_triggered\": $('Trigger Phase 3').item.json.statusCode === 200,\n  \"message\": \"Active reconnaissance completed successfully\"\n} }}",
         "options": {}
       },
       "id": "respond-success",
