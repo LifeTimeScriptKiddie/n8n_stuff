@@ -1,0 +1,249 @@
+{
+  "name": "Recon Scanner - Web Interface",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recon-scan",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "recon-scan"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "validate-1",
+              "leftValue": "={{ $json.body.target }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "validate-target",
+      "name": "Validate Target",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"error\", \"message\": \"Target is required\" } }}"
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract target from webhook body\nconst target = $input.item.json.body.target.trim();\n\n// Detect if it's an IP address or domain\nconst ipRegex = /^(\\d{1,3}\\.){3}\\d{1,3}$/;\nconst isIP = ipRegex.test(target.replace(/^https?:\\/\\//, '').split('/')[0]);\n\n// Clean target (remove protocol, path)\nlet cleanTarget = target.replace(/^https?:\\/\\//, '').split('/')[0];\n\nreturn {\n  json: {\n    target: cleanTarget,\n    original_target: target,\n    type: isIP ? 'ip' : 'domain',\n    timestamp: $input.item.json.body.timestamp || new Date().toISOString(),\n    source: $input.item.json.body.source || 'unknown',\n    scan_id: `scan-${Date.now()}`\n  }\n};"
+      },
+      "id": "process-target",
+      "name": "Process Target",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-1",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "domain",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-type",
+      "name": "Check Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "command": "=subfinder -d {{ $json.target }} -silent | head -20",
+        "options": {}
+      },
+      "id": "run-subfinder",
+      "name": "Run Subfinder",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1120, 180]
+    },
+    {
+      "parameters": {
+        "command": "=nmap -sV -T4 --top-ports 100 {{ $json.target }} -oN /tmp/nmap-{{ $json.scan_id }}.txt && cat /tmp/nmap-{{ $json.scan_id }}.txt",
+        "options": {}
+      },
+      "id": "run-nmap",
+      "name": "Run Nmap",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1120, 420]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO recon_sessions (target, scan_type, status, metadata, created_at)\nVALUES (\n  '{{ $json.target }}',\n  '{{ $json.type }}',\n  'completed',\n  '{{ JSON.stringify({ scan_id: $json.scan_id, source: $json.source }) }}',\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "store-session",
+      "name": "Store Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [1340, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-recon",
+          "name": "PostgreSQL Recon"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"success\", \"message\": \"Scan initiated\", \"scan_id\": $json.scan_id, \"target\": $json.target, \"type\": $json.type } }}"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Target": {
+      "main": [
+        [
+          {
+            "node": "Process Target",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Target": {
+      "main": [
+        [
+          {
+            "node": "Check Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Type": {
+      "main": [
+        [
+          {
+            "node": "Run Subfinder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Nmap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Subfinder": {
+      "main": [
+        [
+          {
+            "node": "Store Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Nmap": {
+      "main": [
+        [
+          {
+            "node": "Store Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Session": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-10-28T00:00:00.000Z",
+  "versionId": "1"
+}

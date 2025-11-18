@@ -1,0 +1,500 @@
+{
+  "name": "Phase 0: Pre-Flight Validation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "red-team-scan",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Scan Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "webhookId": "red-team-scan"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse and validate incoming request\nconst target = $input.item.json.body?.target || $input.item.json.query?.target;\nconst scopeFile = $input.item.json.body?.scope_file || 'scopes/example_scope.json';\nconst stealthProfile = $input.item.json.body?.stealth_profile || 'medium_balanced';\nconst manualApproval = $input.item.json.body?.manual_approval || false;\n\nif (!target) {\n  return {\n    json: {\n      error: true,\n      message: 'Missing required parameter: target',\n      status: 400\n    }\n  };\n}\n\n// Clean and normalize target\nlet cleanTarget = target.trim().toLowerCase();\n// Remove protocol if present\ncleanTarget = cleanTarget.replace(/^https?:\\/\\//, '');\n// Remove port if present\ncleanTarget = cleanTarget.replace(/:[0-9]+$/, '');\n// Remove path if present\ncleanTarget = cleanTarget.split('/')[0];\n\n// Validate format (IP or domain)\nconst ipPattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;\nconst domainPattern = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(?:\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$/;\n\nconst isIP = ipPattern.test(cleanTarget);\nconst isDomain = domainPattern.test(cleanTarget);\n\nif (!isIP && !isDomain) {\n  return {\n    json: {\n      error: true,\n      message: `Invalid target format: ${cleanTarget}. Must be IP address or domain name.`,\n      status: 400\n    }\n  };\n}\n\nreturn {\n  json: {\n    target: cleanTarget,\n    original_target: target,\n    target_type: isIP ? 'ip' : 'domain',\n    scope_file: scopeFile,\n    stealth_profile: stealthProfile,\n    manual_approval: manualApproval,\n    timestamp: new Date().toISOString(),\n    error: false\n  }\n};"
+      },
+      "id": "parse-validate-input",
+      "name": "Parse & Validate Input",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.error}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-validation-error",
+      "name": "Validation Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({\n  success: false,\n  error: $json.message,\n  timestamp: $json.timestamp\n})}}",
+        "options": {
+          "responseCode": "={{$json.status}}"
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond: Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "command": "=node /home/node/.n8n/scopes/scope-validator.js {{$json.target}} {{$json.scope_file}}"
+      },
+      "id": "run-scope-validator",
+      "name": "Run Scope Validator",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse scope validator output and exit code\nconst exitCode = $input.item.json.exitCode || $input.item.json.code;\nconst stdout = $input.item.json.stdout || '';\nconst stderr = $input.item.json.stderr || '';\n\n// Exit codes:\n// 0 = authorized\n// 1 = not authorized\n// 2 = error\n\nconst authorized = exitCode === 0;\nconst validationError = exitCode === 2;\n\nreturn {\n  json: {\n    ...($input.item.json),\n    authorized: authorized,\n    validation_error: validationError,\n    exit_code: exitCode,\n    validator_output: stdout,\n    validator_error: stderr\n  }\n};"
+      },
+      "id": "parse-scope-result",
+      "name": "Parse Scope Result",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.authorized}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-authorization",
+      "name": "Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({\n  success: false,\n  error: 'Target not authorized for scanning',\n  target: $json.target,\n  reason: $json.validator_output || 'Target not in scope',\n  timestamp: new Date().toISOString()\n})}}",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "respond-unauthorized",
+      "name": "Respond: Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) as active_scans FROM recon_sessions WHERE status = 'active' OR status = 'in_progress';",
+        "options": {}
+      },
+      "id": "check-concurrent-scans",
+      "name": "Check Concurrent Scans",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1450, 500],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - recon_hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Check if we're under the concurrent scan limit\nconst activeScans = parseInt($json.active_scans) || 0;\nconst maxConcurrent = 3; // From scope rules\n\nif (activeScans >= maxConcurrent) {\n  return {\n    json: {\n      ...$input.item.json,\n      rate_limited: true,\n      active_scans: activeScans,\n      max_concurrent: maxConcurrent,\n      error: `Rate limit exceeded: ${activeScans}/${maxConcurrent} concurrent scans active`\n    }\n  };\n}\n\nreturn {\n  json: {\n    ...$input.item.json,\n    rate_limited: false,\n    active_scans: activeScans,\n    max_concurrent: maxConcurrent\n  }\n};"
+      },
+      "id": "check-rate-limit",
+      "name": "Check Rate Limit",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1650, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.rate_limited}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-if-rate-limited",
+      "name": "Rate Limited?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1850, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({\n  success: false,\n  error: 'Rate limit exceeded',\n  message: $json.error,\n  active_scans: $json.active_scans,\n  max_concurrent: $json.max_concurrent,\n  timestamp: new Date().toISOString()\n})}}",
+        "options": {
+          "responseCode": 429
+        }
+      },
+      "id": "respond-rate-limited",
+      "name": "Respond: Rate Limited",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2050, 400]
+    },
+    {
+      "parameters": {
+        "command": "df -h / | tail -1 | awk '{print $5}' | sed 's/%//'"
+      },
+      "id": "check-disk-space",
+      "name": "Check Disk Space",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2050, 600]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Check if we have enough disk space (>10GB free)\nconst diskUsagePercent = parseInt($json.stdout) || 100;\nconst diskFull = diskUsagePercent > 90;\n\nif (diskFull) {\n  return {\n    json: {\n      ...$input.item.json,\n      resource_error: true,\n      error: `Insufficient disk space: ${diskUsagePercent}% used`,\n      disk_usage: diskUsagePercent\n    }\n  };\n}\n\nreturn {\n  json: {\n    ...$input.item.json,\n    resource_error: false,\n    disk_usage: diskUsagePercent\n  }\n};"
+      },
+      "id": "check-resources",
+      "name": "Check Resources",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2250, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.resource_error}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-resource-error",
+      "name": "Resource Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2450, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({\n  success: false,\n  error: 'Insufficient resources',\n  message: $json.error,\n  timestamp: new Date().toISOString()\n})}}",
+        "options": {
+          "responseCode": 503
+        }
+      },
+      "id": "respond-resource-error",
+      "name": "Respond: Resource Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2650, 500]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO recon_sessions (session_name, target_scope, status, notes) VALUES ('{{$json.target}}_{{$now.format(\"YYYYMMDDHHmmss\")}}', '{{$json.target}}', 'authorized', 'Created by Phase 0: Pre-Flight Validation') RETURNING id, session_name;",
+        "options": {}
+      },
+      "id": "create-session",
+      "name": "Create Recon Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2650, 700],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - recon_hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO scan_checkpoints (session_id, phase, step_number, step_name, status, data) VALUES ({{$json.id}}, 'preflight', 0, 'Pre-flight validation complete', 'completed', '{\"target\": \"{{$json.target}}\", \"authorized\": true}') RETURNING *;",
+        "options": {}
+      },
+      "id": "create-checkpoint",
+      "name": "Create Checkpoint",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2850, 700],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - recon_hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({\n  success: true,\n  message: 'Pre-flight validation passed',\n  session_id: $json.id,\n  session_name: $json.session_name,\n  target: $('Parse & Validate Input').item.json.target,\n  target_type: $('Parse & Validate Input').item.json.target_type,\n  stealth_profile: $('Parse & Validate Input').item.json.stealth_profile,\n  next_phase: 'Phase 1: Passive Reconnaissance',\n  webhook_urls: {\n    phase1: `${$env.WEBHOOK_URL}phase1-passive-recon?session_id=${$json.id}`,\n    phase2: `${$env.WEBHOOK_URL}phase2-active-recon?session_id=${$json.id}`,\n    phase3: `${$env.WEBHOOK_URL}phase3-vuln-assessment?session_id=${$json.id}`,\n    phase4: `${$env.WEBHOOK_URL}phase4-reporting?session_id=${$json.id}`\n  },\n  timestamp: new Date().toISOString()\n})}}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond: Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3250, 700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase1-passive-recon",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"session_id\": $('Create Recon Session').item.json.id, \"session_name\": $('Create Recon Session').item.json.session_name, \"target\": $('Parse & Validate Input').item.json.target, \"target_type\": $('Parse & Validate Input').item.json.target_type, \"stealth_profile\": $('Parse & Validate Input').item.json.stealth_profile, \"source\": \"phase0\" } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase1",
+      "name": "Trigger Phase 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3050, 700],
+      "notes": "Starts Phase 1: Passive Reconnaissance after validation succeeds",
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Webhook: Scan Request": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Validation Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validation Error?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Scope Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Scope Validator": {
+      "main": [
+        [
+          {
+            "node": "Parse Scope Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Scope Result": {
+      "main": [
+        [
+          {
+            "node": "Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Check Concurrent Scans",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Concurrent Scans": {
+      "main": [
+        [
+          {
+            "node": "Check Rate Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Rate Limit": {
+      "main": [
+        [
+          {
+            "node": "Rate Limited?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limited?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Rate Limited",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Disk Space",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Disk Space": {
+      "main": [
+        [
+          {
+            "node": "Check Resources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Resources": {
+      "main": [
+        [
+          {
+            "node": "Resource Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resource Error?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Resource Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Recon Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Recon Session": {
+      "main": [
+        [
+          {
+            "node": "Create Checkpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Checkpoint": {
+      "main": [
+        [
+          {
+            "node": "Trigger Phase 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Phase 1": {
+      "main": [
+        [
+          {
+            "node": "Respond: Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "phase0-preflight",
+  "meta": {
+    "instanceId": "n8n-recon-hub"
+  },
+  "tags": [
+    {
+      "name": "red-team",
+      "createdAt": "2025-10-29T20:00:00.000Z",
+      "updatedAt": "2025-10-29T20:00:00.000Z",
+      "id": "1"
+    }
+  ]
+}

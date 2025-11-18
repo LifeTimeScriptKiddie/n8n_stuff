@@ -1,0 +1,147 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: recon_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-recon_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-recon_hub}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - recon-net
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-recon_user} -d ${POSTGRES_DB:-recon_hub}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  n8n-recon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: n8n_recon_hub
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    environment:
+      # Database Configuration
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-recon_hub}
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-recon_user}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_POSTGRESDB_SCHEMA: public
+
+      # n8n Configuration
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_EDITOR_BASE_URL: http://localhost:5678
+      WEBHOOK_URL: http://localhost  
+      N8N_PROXY_HOPS: 1
+      # Security - Basic Auth
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+
+      # Encryption
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+
+      # Timezone
+      GENERIC_TIMEZONE: ${TIMEZONE:-UTC}
+      TZ: ${TIMEZONE:-UTC}
+
+      # Settings
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: true
+
+      # CORS Configuration (allow web interface to call webhooks)
+      N8N_CORS_ORIGIN: http://localhost:8080,http://127.0.0.1:8080
+
+
+      # Environment paths
+      SECLISTS_PATH: /opt/SecLists
+
+      # Third-Party API Keys
+      SHODAN_API_KEY: ${SHODAN_API_KEY}
+      CENSYS_API_ID: ${CENSYS_API_ID}
+      CENSYS_API_SECRET: ${CENSYS_API_SECRET}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY}
+      SHODAN_RATE_LIMIT: ${SHODAN_RATE_LIMIT:-1}
+      CENSYS_RATE_LIMIT: ${CENSYS_RATE_LIMIT:-0.4}
+      VIRUSTOTAL_RATE_LIMIT: ${VIRUSTOTAL_RATE_LIMIT:-4}
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./scopes:/home/node/.n8n/scopes:ro
+      - recon_workspace:/opt/recon-workspace
+      - loot:/opt/loot
+
+    ports:
+      - "127.0.0.1:5678:5678"  # Direct admin access via localhost only
+
+    networks:
+      - recon-net
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --spider -q http://localhost:5678/healthz || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  nginx:
+    image: nginx:alpine
+    container_name: n8n_nginx_proxy
+    restart: unless-stopped
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./web-interface:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+    networks:
+      - recon-net
+    depends_on:
+      - n8n-recon
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  recon-net:
+    driver: bridge
+    name: recon_network
+
+volumes:
+  postgres_data:
+    name: recon_postgres_data
+  n8n_data:
+    name: recon_n8n_data
+  recon_workspace:
+    name: recon_workspace
+  loot:
+    name: recon_loot

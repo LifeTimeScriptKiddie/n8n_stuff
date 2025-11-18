@@ -1,0 +1,52 @@
+╔════════════════════════════════════════════════════════════════════════╗
+║                                                                        ║
+║              n8n RECON HUB - BACKUP METADATA                           ║
+║                                                                        ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+Backup Information:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Timestamp:        Wed Oct 29 08:50:25 EDT 2025
+  Backup Directory: ./backups/backup_20251029_085024
+  Database Size:    120K
+  Database Checksum: c1db99c257b6d1ccce0c1967713d9455
+
+Container Status:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NAME                IMAGE                COMMAND                  SERVICE         CREATED        STATUS                  PORTS
+n8n_recon_hub       n8n-n8n-recon        "tini -- /docker-ent…"   n8n-recon       16 hours ago   Up 16 hours (healthy)   0.0.0.0:5678->5678/tcp, [::]:5678->5678/tcp
+n8n_web_interface   nginx:alpine         "/docker-entrypoint.…"   web-interface   16 hours ago   Up 16 hours             0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+recon_postgres      postgres:15-alpine   "docker-entrypoint.s…"   postgres        5 days ago     Up 5 days (healthy)     127.0.0.1:5432->5432/tcp
+
+Backup Contents:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ✓ database.sql           - PostgreSQL full dump
+  ✓ encryption_key.txt     - n8n encryption key (CRITICAL!)
+  ✓ .env                   - Environment configuration
+  ✓ metadata.txt           - This file
+
+Restore Instructions:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+To restore from this backup:
+
+  1. Stop n8n container:
+     docker compose stop n8n-recon
+
+  2. Restore encryption key to .env:
+     N8N_ENCRYPTION_KEY=$(cat ./backups/backup_20251029_085024/encryption_key.txt)
+
+  3. Restore database:
+     docker compose exec -T postgres psql -U recon_user -d recon_hub < ./backups/backup_20251029_085024/database.sql
+
+  4. Restart n8n:
+     docker compose start n8n-recon
+
+  5. Verify at http://localhost:5678
+
+For detailed instructions, see: BACKUP_GUIDE.md
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,0 +1,64 @@
+{
+  "scope_name": "acme_corp_internal_assessment_2025",
+  "description": "Internal red team assessment of Acme Corporation infrastructure - Q1 2025",
+
+  "in_scope": [
+    "*.acmecorp.internal",
+    "*.acmecorp.com",
+    "*.oastify.com",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "acme-prod.example.com",
+    "acme-staging.example.com"
+  ],
+
+  "out_of_scope": [
+    "hr.acmecorp.internal",
+    "payroll.acmecorp.internal",
+    "pii-db.acmecorp.internal",
+    "*.vendor.com",
+    "*.third-party-service.com"
+  ],
+
+  "authorization": {
+    "authorized_by": "Jane Smith <jane.smith@acmecorp.com>",
+    "authorization_date": "2025-01-15",
+    "expiry_date": "2026-12-31",
+    "engagement_type": "red_team",
+    "documentation_url": "https://acmecorp.internal/security/red-team/2025-q1-authorization.pdf"
+  },
+
+  "rules": {
+    "max_ports": 1000,
+    "allowed_tools": [
+      "nmap",
+      "naabu",
+      "subfinder",
+      "amass",
+      "dnsx",
+      "httpx",
+      "nuclei",
+      "ffuf",
+      "testssl.sh",
+      "gowitness",
+      "katana",
+      "gau",
+      "subjack",
+      "webanalyze",
+      "tlsx"
+    ],
+    "stealth_level": "medium",
+    "max_concurrent_scans": 3,
+    "rate_limit_per_sec": 10,
+    "require_manual_approval": false
+  },
+
+  "contacts": {
+    "client_contact": "Jane Smith <jane.smith@acmecorp.com>",
+    "technical_contact": "DevOps Team <devops@acmecorp.com>",
+    "escalation_contact": "CISO <ciso@acmecorp.com>"
+  },
+
+  "notes": "This is an authorized internal red team assessment. All findings must be reported to the security team within 24 hours of discovery. Do not test production payment processing systems. If critical vulnerabilities are found, immediately notify the escalation contact."
+}

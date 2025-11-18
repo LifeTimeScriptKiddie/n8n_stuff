@@ -1,0 +1,118 @@
+# ============================================
+# SENSITIVE FILES - Security Critical
+# ============================================
+# Backups
+n8n/backups/*
+*.bak*
+*.backup
+
+#live files
+*.picopass
+*.bin
+# Environment & Credentials
+.env
+*.env
+.env.*
+*credentials*
+*secrets*
+config.local.*
+
+# Certificates & Keys
+*.key
+*.pem
+*.cert
+*.crt
+*.p12
+*.pfx
+
+# Sensitive JSON files (specific patterns instead of all JSON)
+*-secrets.json
+*credentials.json
+*-private.json
+secrets.json
+
+# ============================================
+# PYTHON
+# ============================================
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+.virtualenv/
+
+# ============================================
+# LOGS & DATABASES
+# ============================================
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# SYSTEM & EDITOR FILES
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Vim
+*.swp
+*.swo
+*.swn
+*~
+
+# Emacs
+\#*\#
+.\#*
+
+# ============================================
+# IDE & EDITOR DIRECTORIES
+# ============================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+
+# ============================================
+# TEMPORARY FILES
+# ============================================
+*.tmp
+*.temp
+*.cache
+
+# ============================================
+# NODE.JS (if applicable)
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json.backup
+
+# ============================================
+# TOOL-SPECIFIC DATA
+# ============================================
+RECONattNATOR/services/ui/nginx.conf
+RECONattNATOR/cases/
+
+# ============================================
+# PROJECT-SPECIFIC IGNORES
+# ============================================
+gemini.md
