@@ -42,6 +42,24 @@
               "name": "timestamp",
               "value": "={{ $now }}",
               "type": "string"
+            },
+            {
+              "id": "debug",
+              "name": "debug",
+              "value": "={{ $json.body.debug || false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "phases",
+              "name": "phases",
+              "value": "={{ $json.body.phases || [1,2,3,4] }}",
+              "type": "string"
+            },
+            {
+              "id": "skip_db",
+              "name": "skip_db",
+              "value": "={{ $json.body.skip_db || false }}",
+              "type": "boolean"
             }
           ]
         },
@@ -75,7 +93,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"success\": true, \"message\": \"Reconnaissance scan initiated\", \"target\": $json.target, \"session_id\": $json.session_id, \"timestamp\": $json.timestamp } }}"
+        "responseBody": "={{ { \"success\": true, \"message\": \"Reconnaissance scan initiated\", \"target\": $json.target, \"session_id\": $json.session_id, \"timestamp\": $json.timestamp, \"debug\": $json.debug, \"phases\": $json.phases, \"skip_db\": $json.skip_db, \"source\": $json.source, \"webhook_endpoints\": { \"phase1\": \"http://n8n-recon:5678/webhook/phase1-passive-recon\", \"phase2\": \"http://n8n-recon:5678/webhook/phase2-active-recon\", \"phase3\": \"http://n8n-recon:5678/webhook/phase3-vuln-assessment\", \"phase4\": \"http://n8n-recon:5678/webhook/phase4-analysis-reporting\" } } }}"
       },
       "id": "respond-to-webhook",
       "name": "Respond: Scan Started",
