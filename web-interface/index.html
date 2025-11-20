@@ -206,6 +206,62 @@
             to { transform: rotate(360deg); }
         }
 
+        .report-section {
+            margin-top: 20px;
+            border: 2px solid #00ffff;
+            border-radius: 5px;
+            background: rgba(0, 255, 255, 0.05);
+        }
+
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: rgba(0, 255, 255, 0.1);
+            border-bottom: 1px solid #00ffff;
+            font-weight: bold;
+            color: #00ffff;
+        }
+
+        .copy-btn {
+            background: #00ffff;
+            color: #000;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .copy-btn:hover {
+            background: #00ff41;
+        }
+
+        .report-content {
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: #ccc;
+        }
+
+        .report-content h1, .report-content h2, .report-content h3 {
+            color: #00ff41;
+            margin: 15px 0 10px 0;
+        }
+
+        .report-content ul {
+            margin-left: 20px;
+        }
+
+        .report-content li {
+            margin: 5px 0;
+        }
+
         @media (max-width: 600px) {
             .container {
                 padding: 25px;
@@ -246,6 +302,14 @@
 
         <div id="message" class="message"></div>
 
+        <div id="reportSection" class="report-section" style="display: none;">
+            <div class="report-header">
+                <span>📋 Security Report</span>
+                <button id="copyBtn" class="copy-btn" onclick="copyReport()">📋 Copy</button>
+            </div>
+            <div id="reportContent" class="report-content"></div>
+        </div>
+
         <div class="info">
             <div class="info-title">ℹ️ What Happens Next:</div>
             <ul>
@@ -258,14 +322,21 @@
     </div>
 
     <script>
-        // Configuration - using relative URL (proxied through nginx to n8n)
-        const N8N_WEBHOOK_URL = '/webhook/recon-scan';
+        // Configuration - Using nginx proxy for agentic pentest workflow
+        const N8N_WEBHOOK_URL = '/webhook/pentest';
+
+        // Alternative configurations (comment/uncomment as needed):
+        // const N8N_WEBHOOK_URL = '/webhook/demo-recon';  // Simple demo workflow
+        // const N8N_WEBHOOK_URL = '/webhook/recon-scan';  // Full workflow with PostgreSQL
 
         // Form elements
         const form = document.getElementById('scanForm');
         const targetInput = document.getElementById('target');
         const submitBtn = document.getElementById('submitBtn');
         const messageDiv = document.getElementById('message');
+        const reportSection = document.getElementById('reportSection');
+        const reportContent = document.getElementById('reportContent');
+        let currentReport = '';
 
         // Validate target (IP address or domain)
         function isValidTarget(target) {
@@ -337,11 +408,19 @@
 
                 if (response.ok) {
                     const result = await response.json();
-                    showMessage(`✅ Target submitted successfully! Scan initiated for: ${target}`, 'success');
+
+                    if (result.report) {
+                        // Display the report
+                        currentReport = result.report;
+                        reportContent.textContent = result.report.replace(/\\n/g, '\n');
+                        reportSection.style.display = 'block';
+                        showMessage(`✅ Scan complete! ${result.commands_executed} commands executed.`, 'success');
+                    } else {
+                        showMessage(`✅ Target submitted successfully! Scan initiated for: ${target}`, 'success');
+                    }
 
                     // Clear form
                     targetInput.value = '';
-                    targetInput.focus();
                 } else {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -367,7 +446,17 @@
                 form.dispatchEvent(new Event('submit'));
             }
         });
+
+        // Copy report to clipboard
+        function copyReport() {
+            navigator.clipboard.writeText(currentReport.replace(/\\n/g, '\n')).then(() => {
+                document.getElementById('copyBtn').textContent = '✅ Copied!';
+                setTimeout(() => {
+                    document.getElementById('copyBtn').textContent = '📋 Copy';
+                }, 2000);
+            });
+        }
     </script>
 </body>
 </html>
-<!-- Cache buster: 1763388750 -->
+<!-- Cache buster: <?php echo time(); ?> 1763462877 -->

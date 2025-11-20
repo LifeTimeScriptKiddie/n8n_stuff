@@ -98,8 +98,65 @@
       "name": "Trigger Phase 1",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
+      "position": [900, 300],
+      "notes": "Starts Phase 1: Passive Reconnaissance",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase2-active-recon",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $json.target, \"session_id\": $json.session_id, \"source\": $json.source } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase2",
+      "name": "Trigger Phase 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [900, 400],
-      "notes": "Starts the reconnaissance pipeline directly with Phase 1: Passive Reconnaissance",
+      "notes": "Starts Phase 2: Active Reconnaissance",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase3-vuln-assessment",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $json.target, \"session_id\": $json.session_id, \"source\": $json.source } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase3",
+      "name": "Trigger Phase 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 500],
+      "notes": "Starts Phase 3: Vulnerability Assessment",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase4-analysis-reporting",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $json.target, \"session_id\": $json.session_id, \"source\": $json.source } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase4",
+      "name": "Trigger Phase 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 600],
+      "notes": "Starts Phase 4: Analysis & Reporting",
       "continueOnFail": true
     }
   ],
@@ -136,6 +193,21 @@
           },
           {
             "node": "Trigger Phase 1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Phase 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Phase 3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Phase 4",
             "type": "main",
             "index": 0
           }

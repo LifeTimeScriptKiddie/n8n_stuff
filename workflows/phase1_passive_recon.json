@@ -36,10 +36,11 @@
     {
       "parameters": {
         "conditions": {
-          "string": [
+          "number": [
             {
-              "value1": "={{ $json.session_id }}",
-              "operation": "isNotEmpty"
+              "value1": "={{ $('Load Session Details').all().length }}",
+              "operation": "larger",
+              "value2": 0
             }
           ]
         }
@@ -67,7 +68,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase1_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
+        "query": "=UPDATE recon_sessions SET status = 'phase1_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase1",
@@ -85,7 +86,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_started',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_started',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase1-start",
@@ -102,7 +103,7 @@
     },
     {
       "parameters": {
-        "command": "subfinder -d {{ $('Load Session Details').item.json.target }} -silent -all -recursive -o /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt && cat /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt"
+        "command": "=subfinder -d {{ $('Load Session Details').item.json.target }} -silent -all -recursive -o /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt && cat /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt"
       },
       "id": "subfinder-enum",
       "name": "Subfinder: Subdomain Enumeration",
@@ -113,7 +114,7 @@
     },
     {
       "parameters": {
-        "command": "amass enum -passive -d {{ $('Load Session Details').item.json.target }} -silent -timeout 5 && cat ~/.config/amass/amass.txt 2>/dev/null || echo ''"
+        "command": "=amass enum -passive -d {{ $('Load Session Details').item.json.target }} -silent -timeout 5 && cat ~/.config/amass/amass.txt 2>/dev/null || echo ''"
       },
       "id": "amass-enum",
       "name": "Amass: Passive DNS Enumeration",
@@ -197,7 +198,7 @@
     },
     {
       "parameters": {
-        "command": "whois {{ $('Load Session Details').item.json.target }} | grep -E '(OrgName|Organization|NetRange|CIDR|ASN|OriginAS)' || echo ''"
+        "command": "=whois {{ $('Load Session Details').item.json.target }} | grep -E '(OrgName|Organization|NetRange|CIDR|ASN|OriginAS)' || echo ''"
       },
       "id": "whois-lookup",
       "name": "Whois: ASN & Network Info",
@@ -210,12 +211,12 @@
     {
       "parameters": {
         "mode": "combine",
-        "combineBy": "combineAll"
+        "combinationMode": "mergeByPosition"
       },
       "id": "merge-subdomain-results",
       "name": "Merge Subdomain Results",
       "type": "n8n-nodes-base.merge",
-      "typeVersion": 2,
+      "typeVersion": 2.1,
       "position": [1560, 180]
     },
     {
@@ -231,7 +232,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "=INSERT INTO subdomain_intel (session_id, target, subdomain, source, discovered_at, created_at)\nVALUES {{ $json.subdomains }}\nON CONFLICT (session_id, subdomain) DO NOTHING",
+        "query": "=INSERT INTO subdomain_intel (session_id, target, subdomain, source, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.target }}',\n  '{{ $json.subdomain }}',\n  '{{ $json.source }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, subdomain) DO NOTHING",
         "options": {}
       },
       "id": "store-subdomains",
@@ -372,7 +373,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase1_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
+        "query": "=UPDATE recon_sessions SET status = 'phase1_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase1-complete",
@@ -390,7 +391,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_completed',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_completed',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase1-complete",

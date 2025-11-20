@@ -257,6 +257,30 @@ CREATE TABLE IF NOT EXISTS scan_reports (
 
 CREATE INDEX idx_scan_reports_session ON scan_reports(session_id);
 
+-- Scan Checkpoints Table (Workflow checkpoint tracking)
+CREATE TABLE IF NOT EXISTS scan_checkpoints (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(255),
+    phase VARCHAR(50) NOT NULL,
+    step_number INTEGER,
+    step_name VARCHAR(255),
+    data JSONB,
+    status VARCHAR(20) DEFAULT 'pending',
+    checkpoint_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completion_time TIMESTAMP,
+    error_message TEXT,
+    checkpoint_name VARCHAR(255),
+    checkpoint_data JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_checkpoint_session ON scan_checkpoints(session_id);
+CREATE INDEX idx_checkpoint_status ON scan_checkpoints(status);
+CREATE INDEX idx_checkpoint_phase ON scan_checkpoints(phase);
+CREATE INDEX idx_checkpoint_name ON scan_checkpoints(checkpoint_name);
+CREATE INDEX idx_checkpoint_created_at ON scan_checkpoints(created_at);
+CREATE UNIQUE INDEX idx_checkpoints_session_phase_name ON scan_checkpoints(session_id, phase, checkpoint_name) WHERE checkpoint_name IS NOT NULL;
+
 -- Comments for documentation
 COMMENT ON TABLE subdomain_intel IS 'Stores discovered subdomains and their metadata';
 COMMENT ON TABLE network_scans IS 'Network port scanning results from nmap, naabu';
@@ -273,6 +297,7 @@ COMMENT ON TABLE port_scan_results IS 'Open ports discovered during network scan
 COMMENT ON TABLE vulnerability_findings IS 'All vulnerability findings from security assessments';
 COMMENT ON TABLE screenshots IS 'Screenshot metadata for web service captures';
 COMMENT ON TABLE scan_reports IS 'Final scan reports generated in Phase 4';
+COMMENT ON TABLE scan_checkpoints IS 'Workflow checkpoints for tracking progress and resuming scans';
 
 -- Create a function to update last_seen timestamp
 CREATE OR REPLACE FUNCTION update_last_seen()

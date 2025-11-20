@@ -354,6 +354,51 @@ deploy_containers() {
 # Apply Database Migrations
 # ============================================================================
 
+setup_ollama() {
+    print_header "Setting Up Ollama LLM"
+
+    # Check if Ollama container is running
+    if ! docker compose ps | grep -q "recon_ollama.*Up"; then
+        print_warning "Ollama container is not running"
+        return
+    fi
+
+    # Wait for Ollama to be ready
+    print_info "Waiting for Ollama to be ready..."
+    local max_attempts=30
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        if curl -s http://localhost:11434/api/tags &> /dev/null; then
+            print_success "Ollama is ready"
+            break
+        fi
+        attempt=$((attempt + 1))
+        echo -n "."
+        sleep 2
+    done
+    echo ""
+
+    if [ $attempt -eq $max_attempts ]; then
+        print_warning "Ollama health check timeout"
+        return
+    fi
+
+    # Pull llama3.2 model
+    print_info "Pulling llama3.2 model (2GB download - this may take a while)..."
+    echo ""
+
+    if docker exec recon_ollama ollama pull llama3.2; then
+        print_success "llama3.2 model pulled successfully"
+    else
+        print_warning "Failed to pull llama3.2 model"
+        print_info "You can pull it manually later with:"
+        echo "         docker exec recon_ollama ollama pull llama3.2"
+    fi
+
+    echo ""
+}
+
 apply_migrations() {
     print_header "Applying Database Migrations"
 
@@ -413,10 +458,16 @@ verify_installation() {
         print_error "PostgreSQL container is NOT running"
     fi
 
-    if docker compose ps | grep -q "n8n_web_interface.*Up"; then
-        print_success "Web interface container is running"
+    if docker compose ps | grep -q "n8n_nginx_proxy.*Up"; then
+        print_success "Nginx proxy container is running"
     else
-        print_warning "Web interface container is NOT running"
+        print_warning "Nginx proxy container is NOT running"
+    fi
+
+    if docker compose ps | grep -q "recon_ollama.*Up"; then
+        print_success "Ollama LLM container is running"
+    else
+        print_warning "Ollama LLM container is NOT running"
     fi
 
     # Check network
@@ -546,12 +597,17 @@ print_final_info() {
     echo -e "${CYAN}  NEXT STEPS${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ${YELLOW}To use the Web Interface:${NC}"
+    echo -e "  ${YELLOW}To use the Agentic Pentest Demo:${NC}"
     echo -e "  1. Open ${GREEN}http://localhost:5678${NC} and login"
-    echo -e "  2. Import workflow from ${YELLOW}web-interface/n8n-recon-workflow.json${NC}"
-    echo -e "  3. Configure PostgreSQL credential in the workflow"
-    echo -e "  4. Activate the workflow"
-    echo -e "  5. Open ${GREEN}http://localhost:8080${NC} to submit targets"
+    echo -e "  2. Import ${YELLOW}workflows/agentic_pentest_demo.json${NC}"
+    echo -e "  3. Activate the workflow"
+    echo -e "  4. Test: ${GREEN}curl -X POST http://localhost/webhook/pentest -H 'Content-Type: application/json' -d '{\"target\": \"example.com\"}'${NC}"
+    echo ""
+    echo -e "  ${YELLOW}To use the Web Interface:${NC}"
+    echo -e "  1. Import workflow from ${YELLOW}web-interface/n8n-recon-workflow.json${NC}"
+    echo -e "  2. Configure PostgreSQL credential in the workflow"
+    echo -e "  3. Activate the workflow"
+    echo -e "  4. Open ${GREEN}http://localhost:8080${NC} to submit targets"
     echo ""
     echo -e "  ${YELLOW}To create custom workflows:${NC}"
     echo -e "  6. Use Execute Command nodes to run security tools"
@@ -576,6 +632,7 @@ main() {
     create_credentials_file
     build_containers
     deploy_containers
+    setup_ollama
     apply_migrations
     verify_installation
     verify_tools

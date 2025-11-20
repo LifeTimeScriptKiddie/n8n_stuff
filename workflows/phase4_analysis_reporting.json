@@ -36,10 +36,10 @@
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "string": [
             {
               "value1": "={{ $json.body.session_id }}",
-              "operation": "exists"
+              "operation": "isNotEmpty"
             }
           ]
         }
@@ -67,7 +67,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET status = 'phase4_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'",
+        "query": "=UPDATE recon_sessions SET status = 'phase4_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-phase4",
@@ -85,7 +85,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}',\n  'phase4',\n  'analysis_started',\n  '{\"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}',\n  'phase4',\n  'analysis_started',\n  '{\"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-phase4-start",
@@ -263,7 +263,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE recon_sessions SET \n  status = 'completed',\n  completed_at = NOW(),\n  updated_at = NOW()\nWHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'",
+        "query": "=UPDATE recon_sessions SET \n  status = 'completed',\n  completed_at = NOW(),\n  updated_at = NOW()\nWHERE session_id = '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}'",
         "options": {}
       },
       "id": "update-session-complete",
@@ -281,7 +281,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}',\n  'phase4',\n  'scan_completed',\n  '{\"end_time\": \"{{ $now }}\", \"report_id\": {{ $('Save Report to Filesystem').item.json.report_id }}}'::jsonb,\n  NOW()\n)",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 4').item.json.body.session_id }}',\n  'phase4',\n  'scan_completed',\n  '{\"end_time\": \"{{ $now }}\", \"report_id\": {{ $('Save Report to Filesystem').item.json.report_id }}}'::jsonb,\n  NOW()\n)",
         "options": {}
       },
       "id": "checkpoint-scan-complete",

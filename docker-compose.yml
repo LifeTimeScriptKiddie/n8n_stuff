@@ -75,6 +75,9 @@ services:
       # Environment paths
       SECLISTS_PATH: /opt/SecLists
 
+      # Ollama Configuration
+      OLLAMA_HOST: http://ollama:11434
+
       # Third-Party API Keys
       SHODAN_API_KEY: ${SHODAN_API_KEY}
       CENSYS_API_ID: ${CENSYS_API_ID}
@@ -111,6 +114,23 @@ services:
       retries: 3
       start_period: 60s
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: recon_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - recon-net
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:11434/api/tags || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   nginx:
     image: nginx:alpine
     container_name: n8n_nginx_proxy
@@ -145,3 +165,5 @@ volumes:
     name: recon_workspace
   loot:
     name: recon_loot
+  ollama_data:
+    name: recon_ollama_data

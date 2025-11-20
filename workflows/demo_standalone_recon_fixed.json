@@ -1,0 +1,135 @@
+{
+  "name": "Demo: Standalone Recon (No DB)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo-recon",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Start Demo Scan",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "demo-recon"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "target",
+              "name": "target",
+              "value": "={{ $json.body.target }}",
+              "type": "string"
+            },
+            {
+              "id": "session_id",
+              "name": "session_id",
+              "value": "={{ $now.format('yyyyMMdd-HHmmss') + '-' + $json.body.target.replace(/[^a-zA-Z0-9]/g, '-') }}",
+              "type": "string"
+            },
+            {
+              "id": "output_dir",
+              "name": "output_dir",
+              "value": "={{ '/tmp/recon/' + $now.format('yyyyMMdd-HHmmss') + '-' + $json.body.target.replace(/[^a-zA-Z0-9]/g, '-') }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "extract-params",
+      "name": "Extract & Validate Target",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "command": "mkdir -p {{ $json.output_dir }}"
+      },
+      "id": "create-output-dir",
+      "name": "Create Output Directory",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        680,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "command": "subfinder -d {{ $('Extract & Validate Target').item.json.target }} -silent -all -o {{ $('Extract & Validate Target').item.json.output_dir }}/subfinder.txt && cat {{ $('Extract & Validate Target').item.json.output_dir }}/subfinder.txt"
+      },
+      "id": "subfinder-scan",
+      "name": "Subfinder: Subdomain Enumeration",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "command": "amass enum -passive -d {{ $('Extract & Validate Target').item.json.target }} -silent -timeout 3 -o {{ $('Extract & Validate Target').item.json.output_dir }}/amass.txt && cat {{ $('Extract & Validate Target').item.json.output_dir }}/amass.txt || echo ''"
+      },
+      "id": "amass-scan",
+      "name": "Amass: Passive DNS",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        900,
+        500
+      ],
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition"
+      },
+      "id": "merge-subdomain-sources",
+      "name": "Merge Subdomain Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and deduplicate subdomains\nconst subdomains = new Set();\nconst outputDir = $('Extract & Validate Target').item.json.output_dir;\n\n// Parse Subfinder\nconst subfinderOutput = $('Subfinder: Subdomain Enumeration').first().json.stdout || '';\nsubfinderOutput.split('\\n').forEach(line => {\n  const domain = line.trim();\n  if (domain && domain.includes('.')) {\n    subdomains.add(domain.toLowerCase());\n  }\n});\n\n// Parse Amass\nconst amassOutput = $('Amass: Passive DNS').first().json.stdout || '';\namassOutput.split('\\n').forEach(line => {\n  const domain = line.trim();\n  if (domain && domain.includes('.')) {\n    subdomains.add(domain.toLowerCase());\n  }\n});\n\nconst uniqueList = Array.from(subdomains).sort();\n\nconsole.log(`Found ${uniqueList.length} unique subdomains`);\n\nreturn [{\n  json: {\n    subdomains: uniqueList,\n    count: uniqueList.length,\n    output_dir: outputDir\n  }\n}];"
+      },
+      "id": "deduplicate-subdomains",
+      "name": "Deduplicate Subdomains",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        400
+      ]
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    "demo"
+  ],
+  "pinData": {}
+}
