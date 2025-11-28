@@ -1,0 +1,181 @@
+{
+  "name": "AI Chat Interface",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-chat",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "ai-chat-new",
+      "id": "webhook-1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/chat",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "llama3.2:latest"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [{\"role\": \"system\", \"content\": \"You are a security assistant. Parse requests and return JSON with: action (scan/status/help), target (if scan), mode (quick/standard/thorough). Example: {\\\"action\\\": \\\"scan\\\", \\\"target\\\": \\\"10.0.0.1\\\", \\\"mode\\\": \\\"standard\\\"}. ONLY JSON.\"}, {\"role\": \"user\", \"content\": $json.body.message || $json.message || \"help\"}] }}"
+            },
+            {
+              "name": "stream",
+              "value": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "id": "ollama-1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst result = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  const message = item.json.message || {};\n  const content = message.content || '';\n  \n  let action = 'help';\n  let target = null;\n  let mode = 'standard';\n  \n  const match = content.match(/\\{[^}]+\\}/);\n  if (match) {\n    const parsed = JSON.parse(match[0]);\n    if (parsed) {\n      action = parsed.action || 'help';\n      target = parsed.target || null;\n      mode = parsed.mode || 'standard';\n    }\n  }\n  \n  result.push({\n    json: {\n      action: action,\n      target: target,\n      mode: mode\n    }\n  });\n}\n\nreturn result;"
+      },
+      "name": "Parse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "id": "parse-1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action }}",
+              "value2": "scan"
+            }
+          ]
+        }
+      },
+      "name": "Is Scan?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "id": "if-scan"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/pentest/v2",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "={{ $json.target }}"
+            },
+            {
+              "name": "project_id",
+              "value": "69bcc86a-a0dd-4b64-87a2-4eb820fd0fb4"
+            },
+            {
+              "name": "mode",
+              "value": "={{ $json.mode }}"
+            },
+            {
+              "name": "source",
+              "value": "ai-chat"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Start Scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200],
+      "id": "scan-1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, target, status, job_type, created_at FROM scan_jobs ORDER BY created_at DESC LIMIT 10",
+        "options": {}
+      },
+      "name": "Get Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1120, 400],
+      "id": "status-1",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst result = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  let response = '';\n  \n  if (item.json.success !== undefined) {\n    if (item.json.success) {\n      response = 'Scan started! Target: ' + item.json.target + ', Job: ' + item.json.scan_job_id;\n    } else {\n      response = 'Scan failed: ' + (item.json.error || 'Unknown error');\n    }\n  } else if (item.json.id) {\n    response = 'Status: ' + item.json.target + ' - ' + item.json.status;\n  } else {\n    response = 'Commands: \"scan TARGET\", \"status\", \"help\"';\n  }\n  \n  result.push({\n    json: {\n      response: response\n    }\n  });\n}\n\nreturn result;"
+      },
+      "name": "Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "id": "format-1"
+    },
+    {
+      "parameters": {
+        "mode": "respondToWebhook",
+        "respondWith": "json",
+        "responseBody": "={{ {success: true, response: $json.response} }}"
+      },
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 300],
+      "id": "response-1"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Ollama", "type": "main", "index": 0}]]
+    },
+    "Ollama": {
+      "main": [[{"node": "Parse", "type": "main", "index": 0}]]
+    },
+    "Parse": {
+      "main": [[{"node": "Is Scan?", "type": "main", "index": 0}]]
+    },
+    "Is Scan?": {
+      "main": [
+        [{"node": "Start Scan", "type": "main", "index": 0}],
+        [{"node": "Get Status", "type": "main", "index": 0}]
+      ]
+    },
+    "Start Scan": {
+      "main": [[{"node": "Format", "type": "main", "index": 0}]]
+    },
+    "Get Status": {
+      "main": [[{"node": "Format", "type": "main", "index": 0}]]
+    },
+    "Format": {
+      "main": [[{"node": "Response", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-25T00:00:00.000Z",
+  "versionId": "1"
+}

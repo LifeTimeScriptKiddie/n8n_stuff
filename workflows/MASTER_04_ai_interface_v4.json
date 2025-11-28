@@ -1,0 +1,471 @@
+{
+  "name": "MASTER: AI Agent Interface v3 (RAG + Planning) - FIXED",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-agent",
+        "responseMode": "responseNode",
+        "responseNode": "Webhook Response",
+        "options": {}
+      },
+      "name": "Webhook: AI Agent Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 400],
+      "webhookId": "ai-agent-chat",
+      "id": "webhook-ai-agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and validate input\nconst body = $input.first().json.body || $input.first().json;\nconst message = body.message || '';\nconst sessionId = body.session_id || `session_${Date.now()}`;\nconst userId = body.user_id || 'default';\n\nif (!message || message.trim() === '') {\n  throw new Error('Message is required');\n}\n\nreturn [{\n  json: {\n    message: message.trim(),\n    session_id: sessionId,\n    user_id: userId,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "id": "validate-input"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "=ai_session:{{ $json.session_id }}",
+        "options": {}
+      },
+      "name": "Redis: Get Session History",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "id": "redis-get-session",
+      "notes": "Retrieve conversation history from Redis",
+      "continueOnFail": true,
+      "credentials": {
+        "redis": {
+          "id": "YOUR_REDIS_CREDENTIAL_ID",
+          "name": "Redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://chroma:8000/api/v1/collections/pentest_knowledge/query",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"query_texts\": [$json.message],\n  \"n_results\": 5\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "RAG: Query Knowledge Base",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 600],
+      "id": "rag-query",
+      "notes": "Retrieve relevant pentesting knowledge from Chroma",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge session history and RAG results\nconst mainInput = $('Validate Input').first().json;\nconst redisResult = $('Redis: Get Session History').first()?.json || null;\nconst ragResult = $('RAG: Query Knowledge Base').first()?.json || null;\n\n// Parse session history\nlet conversationHistory = [];\ntry {\n  if (redisResult && redisResult.value) {\n    conversationHistory = JSON.parse(redisResult.value);\n  }\n} catch (e) {\n  conversationHistory = [];\n}\n\n// Parse RAG context\nlet ragContext = [];\ntry {\n  if (ragResult && ragResult.documents && ragResult.documents.length > 0) {\n    ragContext = ragResult.documents[0] || [];\n  }\n} catch (e) {\n  ragContext = [];\n}\n\nreturn [{\n  json: {\n    current_message: mainInput.message,\n    session_id: mainInput.session_id,\n    user_id: mainInput.user_id,\n    timestamp: mainInput.timestamp,\n    conversation_history: conversationHistory.slice(-10),\n    rag_context: ragContext.slice(0, 3)\n  }\n}];"
+      },
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400],
+      "id": "merge-context"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build enhanced system prompt for AI Agent\nconst input = $input.first().json;\n\nconst systemPrompt = `You are an elite AI Pentesting Agent with autonomous capabilities.\n\nYour Role:\n- Analyze security targets and recommend attack strategies\n- Create multi-step penetration testing plans\n- Select appropriate tools based on target characteristics\n- Learn from past engagements to improve recommendations\n- Provide actionable, technically accurate guidance\n\nCapabilities:\n1. Tool Selection: subfinder, nuclei, nmap, httpx, ffuf, katana, naabu, sqlmap, hydra, netexec\n2. Autonomous Planning: Create multi-phase attack plans (recon → enumeration → exploitation)\n3. Context Awareness: Use historical data and RAG knowledge to inform decisions\n\nResponse Format:\nAlways respond with JSON in this format:\n{\n  \"analysis\": \"<brief analysis of the request>\",\n  \"action\": \"scan\" | \"plan\" | \"recommend\" | \"status\" | \"help\",\n  \"target\": \"<target if applicable>\",\n  \"plan\": [\n    {\n      \"phase\": \"<phase name>\",\n      \"tools\": [\"tool1\", \"tool2\"],\n      \"description\": \"<what this phase does>\"\n    }\n  ],\n  \"confidence\": 0.0-1.0,\n  \"reasoning\": \"<explain your decision>\"\n}\n\nKnowledge Context:\n${input.rag_context.length > 0 ? input.rag_context.map((ctx, i) => `${i + 1}. ${ctx}`).join('\\n') : 'No historical context available.'}\n\nConversation History:\n${input.conversation_history.length > 0 ? input.conversation_history.map(h => `${h.role}: ${h.content}`).join('\\n') : 'This is the start of a new conversation.'}\n\nInstructions:\n- Be concise but thorough\n- Always consider OPSEC and authorization\n- Recommend standard → thorough modes for unknown targets\n- Suggest quick mode only for known safe targets\n- If user asks to scan something, create a plan\n- If unclear, ask clarifying questions`;\n\nreturn [{\n  json: {\n    system_prompt: systemPrompt,\n    user_message: input.current_message,\n    session_id: input.session_id,\n    user_id: input.user_id,\n    timestamp: input.timestamp,\n    conversation_history: input.conversation_history,\n    rag_context: input.rag_context\n  }\n}];"
+      },
+      "name": "Build Agent Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "id": "build-prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/chat",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"model\": \"llama3.2:1b\",\n  \"messages\": [\n    {\"role\": \"system\", \"content\": $json.system_prompt},\n    {\"role\": \"user\", \"content\": $json.user_message}\n  ],\n  \"stream\": false,\n  \"format\": \"json\",\n  \"options\": {\n    \"temperature\": 0.3,\n    \"top_p\": 0.9,\n    \"top_k\": 40\n  }\n} }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "AI Agent: Reasoning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 400],
+      "id": "ai-reasoning",
+      "notes": "Main AI agent reasoning using llama3.2:1b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and validate AI agent response\nconst input = $input.first().json;\nconst sessionContext = $('Build Agent Prompt').first().json;\n\nlet agentResponse;\ntry {\n  const message = input.message || {};\n  const content = message.content || '{}';\n  agentResponse = JSON.parse(content);\n} catch (e) {\n  // Fallback if JSON parsing fails\n  agentResponse = {\n    analysis: \"Unable to parse response\",\n    action: \"help\",\n    confidence: 0.1,\n    reasoning: \"JSON parsing failed: \" + e.message\n  };\n}\n\n// Validate required fields\nif (!agentResponse.action) {\n  agentResponse.action = 'help';\n}\n\n// Ensure plan is an array\nif (agentResponse.plan && !Array.isArray(agentResponse.plan)) {\n  agentResponse.plan = [];\n}\n\nreturn [{\n  json: {\n    agent_response: agentResponse,\n    session_id: sessionContext.session_id,\n    user_id: sessionContext.user_id,\n    user_message: sessionContext.user_message,\n    timestamp: sessionContext.timestamp,\n    conversation_history: sessionContext.conversation_history\n  }\n}];"
+      },
+      "name": "Parse Agent Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400],
+      "id": "parse-response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.agent_response.action }}",
+              "operation": "equals",
+              "value2": "scan"
+            }
+          ]
+        }
+      },
+      "name": "Route: Is Scan?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 400],
+      "id": "route-scan"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.agent_response.action }}",
+              "operation": "equals",
+              "value2": "status"
+            }
+          ]
+        }
+      },
+      "name": "Route: Is Status?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 600],
+      "id": "route-status"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/pentest/v2",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"target\": $json.agent_response.target,\n  \"project_id\": \"69bcc86a-a0dd-4b64-87a2-4eb820fd0fb4\",\n  \"mode\": $json.agent_response.plan && $json.agent_response.plan.length > 3 ? 'thorough' : 'standard',\n  \"source\": \"ai-agent\"\n} }}",
+        "options": {}
+      },
+      "name": "Execute: Start Scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 300],
+      "id": "execute-scan"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, target, status, job_type, created_at FROM scan_jobs ORDER BY created_at DESC LIMIT 10",
+        "options": {}
+      },
+      "name": "Execute: Get Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [2000, 600],
+      "id": "execute-status",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return plan without executing\nconst input = $input.first().json;\nconst plan = input.agent_response.plan || [];\n\nreturn [{\n  json: {\n    action: 'plan',\n    analysis: input.agent_response.analysis,\n    plan: plan,\n    confidence: input.agent_response.confidence,\n    reasoning: input.agent_response.reasoning,\n    next_steps: \"Review the plan and use 'scan' command to execute\"\n  }\n}];"
+      },
+      "name": "Execute: Return Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 400],
+      "id": "execute-plan"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format final response for user\nconst input = $input.first().json;\nconst agentData = $('Parse Agent Response').first().json;\n\nlet formattedResponse = '';\n\n// Check if this is from scan execution\nif (input.success !== undefined) {\n  if (input.success) {\n    formattedResponse = `🤖 AI Agent Analysis:\\n${agentData.agent_response.analysis}\\n\\n✅ Scan Started!\\n🎯 Target: ${input.target || 'N/A'}\\n📋 Job ID: ${input.scan_job_id || 'N/A'}\\n🔧 Agents: ${(input.agents || []).join(', ')}\\n\\n💡 Reasoning: ${agentData.agent_response.reasoning}`;\n  } else {\n    formattedResponse = `❌ Scan Failed: ${input.error || 'Unknown error'}`;\n  }\n}\n// Check if this is status query\nelse if (Array.isArray($input.all()) && $input.all().length > 1) {\n  const jobs = $input.all();\n  formattedResponse = '📊 Recent Scans:\\n\\n';\n  jobs.slice(0, 5).forEach((job, i) => {\n    const j = job.json;\n    formattedResponse += `${i + 1}. ${j.target} - ${j.status}\\n   ${new Date(j.created_at).toLocaleString()}\\n\\n`;\n  });\n}\n// Check if this is a plan\nelse if (input.action === 'plan') {\n  formattedResponse = `🤖 AI Agent Plan:\\n\\n📋 Analysis: ${input.analysis}\\n\\n`;\n  if (input.plan && input.plan.length > 0) {\n    formattedResponse += '🎯 Proposed Attack Plan:\\n\\n';\n    input.plan.forEach((phase, i) => {\n      formattedResponse += `Phase ${i + 1}: ${phase.phase}\\n`;\n      formattedResponse += `Tools: ${(phase.tools || []).join(', ')}\\n`;\n      formattedResponse += `→ ${phase.description}\\n\\n`;\n    });\n  }\n  formattedResponse += `💡 Reasoning: ${input.reasoning}\\n`;\n  formattedResponse += `📊 Confidence: ${(input.confidence * 100).toFixed(0)}%\\n\\n`;\n  formattedResponse += `${input.next_steps}`;\n}\n// Default response\nelse {\n  formattedResponse = agentData.agent_response.analysis || '🤖 AI Agent ready. Send me a target or ask for help!';\n}\n\nreturn [{\n  json: {\n    response: formattedResponse,\n    agent_response: agentData.agent_response,\n    session_id: agentData.session_id\n  }\n}];"
+      },
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 400],
+      "id": "format-final"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=ai_session:{{ $json.session_id }}",
+        "value": "={{ JSON.stringify([...($('Parse Agent Response').first().json.conversation_history || []), {role: 'user', content: $('Parse Agent Response').first().json.user_message, timestamp: $('Parse Agent Response').first().json.timestamp}, {role: 'assistant', content: $json.response, timestamp: new Date().toISOString()}]) }}",
+        "keyType": "automatic",
+        "propertyName": "value",
+        "options": {
+          "ttl": 3600
+        }
+      },
+      "name": "Redis: Update Session",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [2440, 400],
+      "id": "redis-update-session",
+      "notes": "Store conversation history in Redis (1 hour TTL)",
+      "credentials": {
+        "redis": {
+          "id": "YOUR_REDIS_CREDENTIAL_ID",
+          "name": "Redis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO agent_decisions (session_id, user_id, user_message, agent_response, action_taken, confidence, created_at) VALUES ('{{ $('Parse Agent Response').first().json.session_id }}', '{{ $('Parse Agent Response').first().json.user_id }}', '{{ $('Parse Agent Response').first().json.user_message }}', '{{ JSON.stringify($('Parse Agent Response').first().json.agent_response).replace(/'/g, \"''\") }}', '{{ $('Parse Agent Response').first().json.agent_response.action }}', {{ $('Parse Agent Response').first().json.agent_response.confidence || 0.5 }}, NOW())",
+        "options": {}
+      },
+      "name": "Log: Agent Decision",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [2440, 600],
+      "id": "log-decision",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      },
+      "notes": "Log all agent decisions for learning and analytics",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  success: true,\n  response: $json.response,\n  agent_response: $json.agent_response,\n  session_id: $json.session_id\n} }}"
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2660, 400],
+      "id": "webhook-response"
+    }
+  ],
+  "connections": {
+    "Webhook: AI Agent Chat": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Redis: Get Session History",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RAG: Query Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Get Session History": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: Query Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Build Agent Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Agent Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Agent: Reasoning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent: Reasoning": {
+      "main": [
+        [
+          {
+            "node": "Parse Agent Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Agent Response": {
+      "main": [
+        [
+          {
+            "node": "Route: Is Scan?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Is Scan?": {
+      "main": [
+        [
+          {
+            "node": "Execute: Start Scan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: Is Status?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Is Status?": {
+      "main": [
+        [
+          {
+            "node": "Execute: Get Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute: Return Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Start Scan": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Return Plan": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Get Status": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Redis: Update Session",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log: Agent Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Update Session": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    "ai-agent",
+    "autonomous",
+    "rag"
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-25T00:00:00.000Z",
+  "versionId": "3.2-fixed"
+}

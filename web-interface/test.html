@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head><title>Quick Scan Test</title></head>
+<body style="font-family: Arial; padding: 40px;">
+  <h2>Direct Scan Test</h2>
+  <button onclick="runScan()" style="padding: 15px 30px; font-size: 16px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer;">
+    Scan 10.129.138.155
+  </button>
+  <pre id="result" style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 4px;"></pre>
+  
+  <script>
+  async function runScan() {
+    document.getElementById('result').textContent = 'Starting scan...';
+    
+    const data = {
+      target: '10.129.138.155',
+      project_id: '69bcc86a-a0dd-4b64-87a2-4eb820fd0fb4',
+      mode: 'standard',
+      source: 'direct-test'
+    };
+    
+    try {
+      const response = await fetch('http://localhost:5678/webhook/pentest/v2', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      });
+      
+      const result = await response.json();
+      document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+    } catch (error) {
+      document.getElementById('result').textContent = 'Error: ' + error.message;
+    }
+  }
+  </script>
+</body>
+</html>

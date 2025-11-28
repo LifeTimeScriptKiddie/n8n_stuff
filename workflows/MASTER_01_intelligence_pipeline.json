@@ -1,0 +1,235 @@
+{
+  "name": "MASTER: Intelligence Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag-query",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "RAG Query Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "rag-query-master",
+      "id": "rag-webhook"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 6}]
+        }
+      },
+      "name": "Schedule: Knowledge Embedder (6h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 500],
+      "id": "schedule-embedder"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 12}]
+        }
+      },
+      "name": "Schedule: Learning Extractor (12h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 700],
+      "id": "schedule-learning"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 2}]
+        }
+      },
+      "name": "Schedule: Tool Analyzer (2h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 900],
+      "id": "schedule-analyzer"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 6}]
+        }
+      },
+      "name": "Schedule: Feedback Processor (6h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 1100],
+      "id": "schedule-feedback"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 24}]
+        }
+      },
+      "name": "Schedule: Feed Ingestor (24h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 1300],
+      "id": "schedule-feeds"
+    },
+    {
+      "parameters": {
+        "jsCode": "// RAG Query Handler\nconst body = $input.first().json.body || $input.first().json;\nconst query = body.query || '';\nconst projectId = body.project_id || null;\nconst limit = body.limit || 5;\n\nif (!query) throw new Error('Query required');\n\nreturn [{\n  json: {\n    query: query,\n    project_id: projectId,\n    limit: limit,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "RAG: Parse & Handle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "id": "rag-handler"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get unembedded scan jobs\nSELECT sj.id, sj.project_id, sj.target, sj.results, sj.report\nFROM scan_jobs sj\nWHERE sj.status = 'completed'\n  AND sj.completed_at > NOW() - INTERVAL '7 days'\n  AND NOT EXISTS (\n    SELECT 1 FROM knowledge_vectors kv \n    WHERE kv.source_table = 'scan_jobs' AND kv.source_id::text = sj.id::text\n  )\nORDER BY sj.completed_at DESC LIMIT 20;",
+        "options": {}
+      },
+      "name": "Embedder: Get Unembedded Jobs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 500],
+      "id": "embedder-get",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get completed scans for learning\nSELECT sj.id, sj.project_id, sj.target, sj.results, sj.report\nFROM scan_jobs sj\nWHERE sj.status = 'completed'\n  AND sj.completed_at > NOW() - INTERVAL '24 hours'\nORDER BY sj.completed_at DESC LIMIT 100;",
+        "options": {}
+      },
+      "name": "Learning: Get Recent Scans",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 700],
+      "id": "learning-get",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get tool execution metrics\nSELECT tool_name, tool_category, success_rate, total_executions\nFROM tool_success_metrics\nWHERE total_executions >= 5\nORDER BY success_rate DESC LIMIT 50;",
+        "options": {}
+      },
+      "name": "Analyzer: Get Tool Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 900],
+      "id": "analyzer-get",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get unprocessed feedback\nSELECT lf.*, \n  CASE \n    WHEN lf.target_table = 'vulnerability_findings' THEN (\n      SELECT CONCAT(vuln_type, ' - ', COALESCE(host, url, 'Unknown')) \n      FROM vulnerability_findings WHERE id::text = lf.target_id::text\n    )\n    WHEN lf.target_table = 'agent_decisions' THEN (\n      SELECT decision_type FROM agent_decisions WHERE id = lf.target_id\n    )\n    ELSE NULL\n  END as target_description\nFROM learning_feedback lf\nWHERE lf.processed = FALSE\nORDER BY lf.submitted_at ASC LIMIT 100;",
+        "options": {}
+      },
+      "name": "Feedback: Get Unprocessed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 1100],
+      "id": "feedback-get",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=10",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "Feeds: Get CVE Updates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 1300],
+      "id": "feeds-get",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "respondToWebhook",
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, component: 'rag_query', results: $json } }}"
+      },
+      "name": "RAG: Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "rag-response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log completion\nconst component = $input.first().json.component || 'unknown';\nconst count = $input.all().length;\n\nreturn [{\n  json: {\n    component: component,\n    processed: count,\n    timestamp: new Date().toISOString(),\n    status: 'completed'\n  }\n}];"
+      },
+      "name": "Log Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 900],
+      "id": "log-completion"
+    }
+  ],
+  "connections": {
+    "RAG Query Webhook": {
+      "main": [[{"node": "RAG: Parse & Handle", "type": "main", "index": 0}]]
+    },
+    "Schedule: Knowledge Embedder (6h)": {
+      "main": [[{"node": "Embedder: Get Unembedded Jobs", "type": "main", "index": 0}]]
+    },
+    "Schedule: Learning Extractor (12h)": {
+      "main": [[{"node": "Learning: Get Recent Scans", "type": "main", "index": 0}]]
+    },
+    "Schedule: Tool Analyzer (2h)": {
+      "main": [[{"node": "Analyzer: Get Tool Metrics", "type": "main", "index": 0}]]
+    },
+    "Schedule: Feedback Processor (6h)": {
+      "main": [[{"node": "Feedback: Get Unprocessed", "type": "main", "index": 0}]]
+    },
+    "Schedule: Feed Ingestor (24h)": {
+      "main": [[{"node": "Feeds: Get CVE Updates", "type": "main", "index": 0}]]
+    },
+    "RAG: Parse & Handle": {
+      "main": [[{"node": "RAG: Response", "type": "main", "index": 0}]]
+    },
+    "Embedder: Get Unembedded Jobs": {
+      "main": [[{"node": "Log Completion", "type": "main", "index": 0}]]
+    },
+    "Learning: Get Recent Scans": {
+      "main": [[{"node": "Log Completion", "type": "main", "index": 0}]]
+    },
+    "Analyzer: Get Tool Metrics": {
+      "main": [[{"node": "Log Completion", "type": "main", "index": 0}]]
+    },
+    "Feedback: Get Unprocessed": {
+      "main": [[{"node": "Log Completion", "type": "main", "index": 0}]]
+    },
+    "Feeds: Get CVE Updates": {
+      "main": [[{"node": "Log Completion", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-24T19:00:00.000Z",
+  "versionId": "1"
+}

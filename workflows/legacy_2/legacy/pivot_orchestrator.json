@@ -1,0 +1,430 @@
+{
+  "name": "Pivot Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get queued pivots that pass hop check\nSELECT\n  pq.id as queue_id,\n  pq.project_id,\n  pq.target_host_id,\n  pq.credential_id,\n  pq.pivot_type,\n  pq.hop_level,\n  pq.parent_tunnel_id,\n  h.ip_address as target_ip,\n  h.hostname as target_hostname,\n  sc.username,\n  sc.credential_type,\n  p.port as ssh_port,\n  can_pivot(pq.project_id, pq.target_host_id, pq.hop_level) as pivot_check,\n  get_next_tunnel_port(pq.project_id) as local_port\nFROM pivot_queue pq\nJOIN hosts h ON h.id = pq.target_host_id\nJOIN secure_credentials sc ON sc.id = pq.credential_id\nLEFT JOIN ports p ON p.host_id = h.id AND p.service_name = 'ssh'\nWHERE pq.status = 'queued'\nAND (can_pivot(pq.project_id, pq.target_host_id, pq.hop_level)->>'allowed')::boolean = true\nORDER BY pq.priority DESC, pq.hop_level ASC, pq.queued_at ASC\nLIMIT 3",
+        "options": {}
+      },
+      "name": "Get Queued Pivots",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-pivots",
+              "leftValue": "={{ $json.queue_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Has Pivots?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mark pivot as processing and create tunnel record\nUPDATE pivot_queue SET status = 'processing', started_at = NOW() WHERE id = '{{ $json.queue_id }}'::uuid;\n\nINSERT INTO ssh_tunnels (\n  project_id,\n  source_tunnel_id,\n  target_host_id,\n  credential_id,\n  tunnel_type,\n  local_port,\n  hop_level,\n  status\n) VALUES (\n  '{{ $json.project_id }}'::uuid,\n  {{ $json.parent_tunnel_id ? \"'\" + $json.parent_tunnel_id + \"'::uuid\" : 'NULL' }},\n  '{{ $json.target_host_id }}'::uuid,\n  '{{ $json.credential_id }}'::uuid,\n  'socks',\n  {{ $json.local_port }},\n  {{ $json.hop_level }},\n  'establishing'\n)\nRETURNING id as tunnel_id",
+        "options": {}
+      },
+      "name": "Create Tunnel Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [860, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build SSH tunnel command\nconst pivot = $('Get Queued Pivots').first().json;\nconst tunnel = $input.first().json;\n\nconst target = pivot.target_ip || pivot.target_hostname;\nconst port = pivot.ssh_port || 22;\nconst localPort = pivot.local_port;\n\n// Build proxychains prefix if this is a multi-hop tunnel\nlet proxyPrefix = '';\nif (pivot.parent_tunnel_id) {\n  // Get parent tunnel port for proxychains\n  proxyPrefix = `proxychains -f /tmp/proxy_${pivot.parent_tunnel_id}.conf `;\n}\n\n// SSH command for SOCKS proxy tunnel\n// -D: Dynamic SOCKS proxy\n// -N: No command execution\n// -f: Background\n// -o: Options for automation\nconst sshCmd = `${proxyPrefix}ssh -D ${localPort} -N -f ` +\n  `-o StrictHostKeyChecking=no ` +\n  `-o UserKnownHostsFile=/dev/null ` +\n  `-o ConnectTimeout=10 ` +\n  `-o ServerAliveInterval=30 ` +\n  `-o ServerAliveCountMax=3 ` +\n  `-p ${port} ` +\n  `${pivot.username}@${target}`;\n\nreturn [{\n  json: {\n    ...pivot,\n    tunnel_id: tunnel.tunnel_id,\n    ssh_command: sshCmd,\n    local_port: localPort,\n    target: target\n  }\n}];"
+      },
+      "name": "Build SSH Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.ssh_command }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Establish Tunnel",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if tunnel is working\nconst pivot = $('Build SSH Command').first().json;\nconst result = $input.first().json;\n\n// Give SSH a moment to establish\nawait new Promise(resolve => setTimeout(resolve, 2000));\n\nreturn [{\n  json: {\n    ...pivot,\n    ssh_exit_code: result.exitCode,\n    ssh_stdout: result.stdout,\n    ssh_stderr: result.stderr\n  }\n}];"
+      },
+      "name": "Wait for Tunnel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 200]
+    },
+    {
+      "parameters": {
+        "command": "=nc -z 127.0.0.1 {{ $json.local_port }} && echo 'TUNNEL_ACTIVE' || echo 'TUNNEL_FAILED'",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "name": "Check Tunnel",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1740, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "tunnel-active",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "TUNNEL_ACTIVE",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Tunnel Active?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1960, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get SSH PID and mark tunnel active\nUPDATE ssh_tunnels\nSET status = 'active',\n    established_at = NOW(),\n    health_status = 'healthy',\n    pid = (SELECT pid FROM pg_stat_activity WHERE query LIKE '%ssh%' AND query LIKE '%{{ $json.local_port }}%' LIMIT 1)\nWHERE id = '{{ $json.tunnel_id }}'::uuid;\n\n-- Update pivot queue with tunnel ID\nUPDATE pivot_queue\nSET tunnel_id = '{{ $json.tunnel_id }}'::uuid\nWHERE id = '{{ $json.queue_id }}'::uuid;\n\n-- Create proxychains config file\nSELECT generate_proxychains_config(ARRAY['{{ $json.tunnel_id }}'::uuid]) as config",
+        "options": {}
+      },
+      "name": "Activate Tunnel",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2180, 100],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Write proxychains config and prepare internal scan\nconst pivot = $('Build SSH Command').first().json;\nconst config = $input.first().json;\n\n// The config will be written to a temp file\nconst configPath = `/tmp/proxy_${pivot.tunnel_id}.conf`;\n\nreturn [{\n  json: {\n    ...pivot,\n    proxychains_config: config.config,\n    config_path: configPath\n  }\n}];"
+      },
+      "name": "Prepare Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 100]
+    },
+    {
+      "parameters": {
+        "command": "=echo '{{ $json.proxychains_config }}' > {{ $json.config_path }}",
+        "options": {}
+      },
+      "name": "Write Config",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2620, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Queue internal network scan job\nINSERT INTO scan_jobs (\n  project_id,\n  job_type,\n  status,\n  target,\n  scan_mode,\n  metadata\n) VALUES (\n  '{{ $json.project_id }}'::uuid,\n  'internal_recon',\n  'queued',\n  '{{ $json.target }}',\n  'thorough',\n  '{{ JSON.stringify({ tunnel_id: $json.tunnel_id, pivot_queue_id: $json.queue_id, hop_level: $json.hop_level, proxychains_config: $json.config_path }) }}'::jsonb\n)\nRETURNING id as scan_job_id;\n\n-- Update pivot queue\nUPDATE pivot_queue\nSET scan_job_id = (SELECT id FROM scan_jobs WHERE metadata->>'pivot_queue_id' = '{{ $json.queue_id }}' ORDER BY created_at DESC LIMIT 1)\nWHERE id = '{{ $json.queue_id }}'::uuid;",
+        "options": {}
+      },
+      "name": "Queue Internal Scan",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2840, 100],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Record successful pivot in relationships\nINSERT INTO relationships (\n  project_id,\n  source_host_id,\n  target_host_id,\n  credential_id,\n  relationship_type,\n  metadata\n) VALUES (\n  '{{ $json.project_id }}'::uuid,\n  {{ $json.source_host_id ? \"'\" + $json.source_host_id + \"'::uuid\" : 'NULL' }},\n  '{{ $json.target_host_id }}'::uuid,\n  '{{ $json.credential_id }}'::uuid,\n  'pivot',\n  '{{ JSON.stringify({ tunnel_id: $json.tunnel_id, hop_level: $json.hop_level }) }}'::jsonb\n)\nON CONFLICT DO NOTHING;\n\n-- Create notification\nINSERT INTO notifications (\n  project_id,\n  notification_type,\n  severity,\n  title,\n  message,\n  entity_type,\n  entity_id\n) VALUES (\n  '{{ $json.project_id }}'::uuid,\n  'pivot_established',\n  'high',\n  'Pivot Established: {{ $json.target }}',\n  'SSH tunnel established to {{ $json.target }} (hop {{ $json.hop_level }}). Internal reconnaissance queued.',\n  'ssh_tunnel',\n  '{{ $json.tunnel_id }}'::uuid\n);",
+        "options": {}
+      },
+      "name": "Record Pivot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3060, 100],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mark pivot queue completed\nUPDATE pivot_queue\nSET status = 'completed', completed_at = NOW()\nWHERE id = '{{ $json.queue_id }}'::uuid;\n\n-- Audit log\nINSERT INTO audit_log (project_id, action, entity_type, entity_id, details)\nVALUES (\n  '{{ $json.project_id }}'::uuid,\n  'pivot_established',\n  'ssh_tunnel',\n  '{{ $json.tunnel_id }}'::uuid,\n  '{{ JSON.stringify({ target: $json.target, hop_level: $json.hop_level, local_port: $json.local_port }) }}'\n)",
+        "options": {}
+      },
+      "name": "Complete Pivot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3280, 100],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mark tunnel and pivot as failed\nUPDATE ssh_tunnels\nSET status = 'failed',\n    error_message = 'Failed to establish tunnel'\nWHERE id = '{{ $json.tunnel_id }}'::uuid;\n\nUPDATE pivot_queue\nSET status = 'failed',\n    error_message = 'Tunnel establishment failed',\n    completed_at = NOW()\nWHERE id = '{{ $json.queue_id }}'::uuid;",
+        "options": {}
+      },
+      "name": "Mark Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2180, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Minute": {
+      "main": [
+        [
+          {
+            "node": "Get Queued Pivots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Queued Pivots": {
+      "main": [
+        [
+          {
+            "node": "Has Pivots?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pivots?": {
+      "main": [
+        [
+          {
+            "node": "Create Tunnel Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Create Tunnel Record": {
+      "main": [
+        [
+          {
+            "node": "Build SSH Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build SSH Command": {
+      "main": [
+        [
+          {
+            "node": "Establish Tunnel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Establish Tunnel": {
+      "main": [
+        [
+          {
+            "node": "Wait for Tunnel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Tunnel": {
+      "main": [
+        [
+          {
+            "node": "Check Tunnel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Tunnel": {
+      "main": [
+        [
+          {
+            "node": "Tunnel Active?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tunnel Active?": {
+      "main": [
+        [
+          {
+            "node": "Activate Tunnel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activate Tunnel": {
+      "main": [
+        [
+          {
+            "node": "Prepare Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Config": {
+      "main": [
+        [
+          {
+            "node": "Write Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Config": {
+      "main": [
+        [
+          {
+            "node": "Queue Internal Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Internal Scan": {
+      "main": [
+        [
+          {
+            "node": "Record Pivot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Pivot": {
+      "main": [
+        [
+          {
+            "node": "Complete Pivot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

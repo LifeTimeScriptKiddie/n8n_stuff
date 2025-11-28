@@ -1,0 +1,310 @@
+{
+  "name": "Nmap XML Parser",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  sj.id as job_id,\n  sj.project_id,\n  sj.metadata->>'evidence_id' as evidence_id,\n  sj.metadata->>'minio_path' as minio_path,\n  e.file_name,\n  e.minio_bucket\nFROM scan_jobs sj\nJOIN evidence e ON e.id = (sj.metadata->>'evidence_id')::uuid\nWHERE sj.job_type = 'parse'\nAND sj.status = 'queued'\nAND (sj.metadata->>'file_type' = 'nmap_xml' OR e.file_type = 'nmap_xml')\nORDER BY sj.queued_at ASC\nLIMIT 5",
+        "options": {}
+      },
+      "name": "Get Queued Jobs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-jobs",
+              "leftValue": "={{ $json.job_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Has Jobs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE scan_jobs SET status = 'running', started_at = NOW() WHERE id = '{{ $json.job_id }}'::uuid",
+        "options": {}
+      },
+      "name": "Mark Running",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [860, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://minio:9000/{{ $json.minio_bucket }}/{{ $json.minio_path }}",
+        "options": {}
+      },
+      "name": "Fetch from MinIO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Nmap XML output\nconst xmlData = $input.first().json.data || $input.first().binary?.data?.toString() || '';\nconst job = $('Get Queued Jobs').first().json;\n\n// Simple XML parser for Nmap output\nconst hosts = [];\nconst portRegex = /<port protocol=\"(\\w+)\" portid=\"(\\d+)\">\\s*<state state=\"(\\w+)\"[^>]*\\/>\\s*(?:<service name=\"([^\"]*)\"/)?/g;\nconst hostRegex = /<host[^>]*>([\\s\\S]*?)<\\/host>/g;\nconst addrRegex = /<address addr=\"([^\"]+)\" addrtype=\"(ipv4|ipv6|mac)\"/g;\nconst hostnameRegex = /<hostname name=\"([^\"]+)\"/g;\n\nlet hostMatch;\nwhile ((hostMatch = hostRegex.exec(xmlData)) !== null) {\n  const hostBlock = hostMatch[1];\n  \n  // Extract addresses\n  let ip = null;\n  let addrMatch;\n  while ((addrMatch = addrRegex.exec(hostBlock)) !== null) {\n    if (addrMatch[2] === 'ipv4' || addrMatch[2] === 'ipv6') {\n      ip = addrMatch[1];\n      break;\n    }\n  }\n  \n  // Extract hostname\n  let hostname = null;\n  const hnMatch = hostnameRegex.exec(hostBlock);\n  if (hnMatch) {\n    hostname = hnMatch[1];\n  }\n  \n  if (!ip && !hostname) continue;\n  \n  // Extract ports\n  const ports = [];\n  let portMatch;\n  const portRe = /<port protocol=\"(\\w+)\" portid=\"(\\d+)\">\\s*<state state=\"(\\w+)\"[^>]*\\/>\\s*(?:<service\\s+name=\"([^\"]*)\"(?:\\s+product=\"([^\"]*)\")?(?:\\s+version=\"([^\"]*)\")?)?/g;\n  \n  while ((portMatch = portRe.exec(hostBlock)) !== null) {\n    if (portMatch[3] === 'open') {\n      ports.push({\n        protocol: portMatch[1],\n        port: parseInt(portMatch[2]),\n        state: portMatch[3],\n        service_name: portMatch[4] || null,\n        service_product: portMatch[5] || null,\n        service_version: portMatch[6] || null\n      });\n    }\n  }\n  \n  hosts.push({\n    ip_address: ip,\n    hostname: hostname,\n    ports: ports\n  });\n}\n\nreturn [{\n  json: {\n    job_id: job.job_id,\n    project_id: job.project_id,\n    evidence_id: job.evidence_id,\n    hosts: hosts,\n    host_count: hosts.length,\n    total_ports: hosts.reduce((sum, h) => sum + h.ports.length, 0)\n  }\n}];"
+      },
+      "name": "Parse XML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare SQL for upsert hosts and ports\nconst data = $input.first().json;\nconst statements = [];\n\nfor (const host of data.hosts) {\n  // Upsert host\n  const hostInsert = `\n    INSERT INTO hosts (project_id, ip_address, hostname)\n    VALUES ('${data.project_id}'::uuid, ${host.ip_address ? `'${host.ip_address}'::inet` : 'NULL'}, ${host.hostname ? `'${host.hostname}'` : 'NULL'})\n    ON CONFLICT (project_id, ip_address) DO UPDATE SET\n      hostname = COALESCE(EXCLUDED.hostname, hosts.hostname),\n      last_seen = NOW()\n    RETURNING id`;\n  statements.push({ type: 'host', sql: hostInsert, host: host });\n}\n\nreturn [{\n  json: {\n    ...data,\n    statements: statements\n  }\n}];"
+      },
+      "name": "Prepare Upserts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Upsert all hosts from nmap scan\nWITH input_hosts AS (\n  SELECT * FROM json_to_recordset('{{ JSON.stringify($json.hosts) }}'::json)\n  AS x(ip_address text, hostname text, ports json)\n),\nupserted_hosts AS (\n  INSERT INTO hosts (project_id, ip_address, hostname)\n  SELECT\n    '{{ $json.project_id }}'::uuid,\n    ih.ip_address::inet,\n    ih.hostname\n  FROM input_hosts ih\n  WHERE ih.ip_address IS NOT NULL\n  ON CONFLICT (project_id, ip_address) DO UPDATE SET\n    hostname = COALESCE(EXCLUDED.hostname, hosts.hostname),\n    last_seen = NOW()\n  RETURNING id, ip_address\n)\nSELECT COUNT(*) as hosts_upserted FROM upserted_hosts",
+        "options": {}
+      },
+      "name": "Upsert Hosts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1740, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Now upsert ports for each host\nconst data = $('Prepare Upserts').first().json;\n\n// Flatten all ports with host info\nconst allPorts = [];\nfor (const host of data.hosts) {\n  for (const port of host.ports) {\n    allPorts.push({\n      ip_address: host.ip_address,\n      ...port\n    });\n  }\n}\n\nreturn [{\n  json: {\n    ...data,\n    all_ports: allPorts\n  }\n}];"
+      },
+      "name": "Prepare Ports",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Upsert all ports\nWITH input_ports AS (\n  SELECT * FROM json_to_recordset('{{ JSON.stringify($json.all_ports) }}'::json)\n  AS x(ip_address text, protocol text, port int, state text, service_name text, service_product text, service_version text)\n),\nhost_lookup AS (\n  SELECT h.id as host_id, h.ip_address::text as ip\n  FROM hosts h\n  WHERE h.project_id = '{{ $json.project_id }}'::uuid\n),\nupserted_ports AS (\n  INSERT INTO ports (host_id, port, protocol, state, service_name, service_product, service_version)\n  SELECT\n    hl.host_id,\n    ip.port,\n    ip.protocol,\n    ip.state,\n    ip.service_name,\n    ip.service_product,\n    ip.service_version\n  FROM input_ports ip\n  JOIN host_lookup hl ON hl.ip = ip.ip_address\n  ON CONFLICT (host_id, port, protocol) DO UPDATE SET\n    state = EXCLUDED.state,\n    service_name = COALESCE(EXCLUDED.service_name, ports.service_name),\n    service_version = COALESCE(EXCLUDED.service_version, ports.service_version),\n    last_seen = NOW()\n  RETURNING id\n)\nSELECT COUNT(*) as ports_upserted FROM upserted_ports",
+        "options": {}
+      },
+      "name": "Upsert Ports",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2180, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mark job complete and evidence parsed\nUPDATE scan_jobs\nSET status = 'completed',\n    completed_at = NOW(),\n    results = '{{ JSON.stringify({ hosts_parsed: $json.host_count, ports_parsed: $json.total_ports }) }}'::jsonb\nWHERE id = '{{ $json.job_id }}'::uuid;\n\nUPDATE evidence\nSET parser_status = 'completed', parsed_at = NOW()\nWHERE id = '{{ $json.evidence_id }}'::uuid;",
+        "options": {}
+      },
+      "name": "Mark Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2400, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {}
+      },
+      "name": "No Jobs",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [860, 400]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Queued Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Queued Jobs": {
+      "main": [
+        [
+          {
+            "node": "Has Jobs?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Jobs?": {
+      "main": [
+        [
+          {
+            "node": "Mark Running",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Running": {
+      "main": [
+        [
+          {
+            "node": "Fetch from MinIO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch from MinIO": {
+      "main": [
+        [
+          {
+            "node": "Parse XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse XML": {
+      "main": [
+        [
+          {
+            "node": "Prepare Upserts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Upserts": {
+      "main": [
+        [
+          {
+            "node": "Upsert Hosts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Hosts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Ports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Ports": {
+      "main": [
+        [
+          {
+            "node": "Upsert Ports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Ports": {
+      "main": [
+        [
+          {
+            "node": "Mark Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

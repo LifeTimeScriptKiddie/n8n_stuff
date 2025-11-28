@@ -1,0 +1,69 @@
+{
+  "name": "Approval Handler (Semi-Autonomous Gate)",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}},
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "schedule"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM v_pending_approvals ORDER BY created_at ASC LIMIT 20;",
+        "options": {}
+      },
+      "name": "Get Pending Approvals",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "id": "get-pending",
+      "credentials": {"postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}}
+    },
+    {
+      "parameters": {
+        "conditions": {"number": [{"value1": "={{ $json.length }}", "operation": "larger", "value2": 0}]}
+      },
+      "name": "Has Pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "has-pending"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO notifications (project_id, notification_type, severity, title, message, metadata) VALUES ('{{ $json.project_id }}', 'approval_required', 'warning', 'Action Requires Approval', 'Agent: {{ $json.agent_type }}\\nDecision: {{ $json.decision_type }}\\nConfidence: {{ $json.confidence_score }}\\n\\nReasoning: {{ $json.reasoning }}', jsonb_build_object('decision_id', '{{ $json.id }}'));",
+        "options": {}
+      },
+      "name": "Send Notification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 200],
+      "id": "notify",
+      "credentials": {"postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}}
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({pending_approvals: $input.all().length}) }}"
+      },
+      "name": "Complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "id": "complete"
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {"main": [[{"node": "Get Pending Approvals", "type": "main", "index": 0}]]},
+    "Get Pending Approvals": {"main": [[{"node": "Has Pending", "type": "main", "index": 0}]]},
+    "Has Pending": {"main": [[{"node": "Send Notification", "type": "main", "index": 0}]]},
+    "Send Notification": {"main": [[{"node": "Complete", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": [{"id": "1", "name": "approval"}],
+  "updatedAt": "2025-01-01T00:00:00.000Z"
+}

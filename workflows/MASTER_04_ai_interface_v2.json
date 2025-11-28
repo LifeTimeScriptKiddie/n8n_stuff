@@ -1,0 +1,129 @@
+{
+  "name": "MASTER: AI Interface v2 (Agent)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-chat",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook: AI Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 400],
+      "webhookId": "ai-chat-master",
+      "id": "webhook-ai"
+    },
+    {
+      "parameters": {
+        "model": "llama3.2:latest",
+        "options": {
+          "baseURL": "http://ollama:11434",
+          "temperature": 0.3
+        }
+      },
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "id": "ollama-model"
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.body.message || $json.message || 'help' }}",
+        "options": {
+          "systemMessage": "You are a penetration testing assistant. You help users run security scans, check scan status, and query vulnerability findings.\n\nYou have access to these tools:\n- start_scan: Start a security scan on a target (IP, domain, or CIDR)\n- get_status: Check the status of recent scans\n- help: Show available commands\n\nWhen a user asks to scan something, use the start_scan tool.\nWhen they ask about status, use get_status.\nBe concise and helpful."
+        }
+      },
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [680, 400],
+      "id": "ai-agent"
+    },
+    {
+      "parameters": {
+        "name": "start_scan",
+        "description": "Start a security scan on a target. Target can be an IP address, domain, or CIDR range.",
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/pentest/v2",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $('AI Agent').item.json.target || $json.target, \"project_id\": \"69bcc86a-a0dd-4b64-87a2-4eb820fd0fb4\", \"mode\": $json.mode || \"standard\", \"source\": \"ai-agent\" } }}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "target",
+              "description": "The target to scan (IP, domain, or CIDR)"
+            },
+            {
+              "name": "mode",
+              "description": "Scan mode: quick, standard, or thorough"
+            }
+          ]
+        }
+      },
+      "name": "Tool: Start Scan",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [460, 500],
+      "id": "tool-scan"
+    },
+    {
+      "parameters": {
+        "name": "get_status",
+        "description": "Get the status of recent scans",
+        "operation": "executeQuery",
+        "query": "SELECT id, target, status, job_type, created_at, completed_at FROM scan_jobs ORDER BY created_at DESC LIMIT 10",
+        "options": {}
+      },
+      "name": "Tool: Get Status",
+      "type": "@n8n/n8n-nodes-langchain.toolPostgres",
+      "typeVersion": 1,
+      "position": [460, 600],
+      "id": "tool-status",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "mode": "respondToWebhook",
+        "respondWith": "text",
+        "responseBody": "={{ $json.output }}"
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 400],
+      "id": "webhook-response"
+    }
+  ],
+  "connections": {
+    "Webhook: AI Chat": {
+      "main": [[{"node": "AI Agent", "type": "main", "index": 0}]]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [[{"node": "AI Agent", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Tool: Start Scan": {
+      "ai_tool": [[{"node": "AI Agent", "type": "ai_tool", "index": 0}]]
+    },
+    "Tool: Get Status": {
+      "ai_tool": [[{"node": "AI Agent", "type": "ai_tool", "index": 0}]]
+    },
+    "AI Agent": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-24T20:00:00.000Z",
+  "versionId": "2"
+}

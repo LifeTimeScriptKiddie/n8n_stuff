@@ -1,0 +1,131 @@
+{
+  "name": "Feedback Processor (User Learning Loop)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 6}]
+        }
+      },
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "schedule"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get unprocessed feedback\nSELECT \n  lf.*,\n  CASE \n    WHEN lf.target_table = 'vulnerability_findings' THEN (\n      SELECT CONCAT(vuln_type, ' - ', COALESCE(host, url, 'Unknown')) \n      FROM vulnerability_findings \n      WHERE id::text = lf.target_id::text\n    )\n    WHEN lf.target_table = 'agent_decisions' THEN (SELECT decision_type FROM agent_decisions WHERE id = lf.target_id)\n    ELSE NULL\n  END as target_description\nFROM learning_feedback lf\nWHERE lf.processed = FALSE\nORDER BY lf.submitted_at ASC\nLIMIT 100;",
+        "options": {}
+      },
+      "name": "Get Unprocessed Feedback",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "id": "get-feedback",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [{"value1": "={{ $json.length }}", "operation": "larger", "value2": 0}]
+        }
+      },
+      "name": "Has Feedback",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "has-feedback"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process feedback and determine actions\nconst actions = [];\n\nfor (const item of $input.all()) {\n  const feedback = item.json;\n  let action = {id: feedback.id, changes: {}};\n  \n  // Handle different feedback types\n  switch(feedback.feedback_type) {\n    case 'finding':\n      if (feedback.is_correct === false) {\n        // False positive - lower relevance of related knowledge\n        action.changes.mark_false_positive = true;\n        action.changes.reduce_relevance = 0.2;\n      }\n      if (feedback.rating && feedback.rating >= 4) {\n        // High quality finding - boost relevance\n        action.changes.boost_relevance = 0.1;\n      }\n      break;\n      \n    case 'agent_decision':\n      if (feedback.is_useful === false) {\n        // Bad recommendation - adjust attack pattern confidence\n        action.changes.reduce_pattern_confidence = true;\n      }\n      if (feedback.rating && feedback.rating >= 4) {\n        // Good decision - boost confidence\n        action.changes.boost_pattern_confidence = true;\n      }\n      break;\n      \n    case 'tool_recommendation':\n      if (feedback.is_correct === false) {\n        // Tool didn't work - mark as failed execution\n        action.changes.record_tool_failure = true;\n      }\n      break;\n      \n    case 'attack_pattern':\n      if (feedback.is_useful === false) {\n        // Pattern didn't work - increment failure count\n        action.changes.increment_pattern_failure = true;\n      }\n      if (feedback.is_useful === true) {\n        // Pattern worked - increment success\n        action.changes.increment_pattern_success = true;\n      }\n      break;\n  }\n  \n  // Store correction data if provided\n  if (feedback.correction_data) {\n    action.changes.correction = feedback.correction_data;\n  }\n  \n  actions.push({json: {...feedback, action: action}});\n}\n\nreturn actions;"
+      },
+      "name": "Determine Actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200],
+      "id": "determine-actions"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Apply feedback changes\n{% if $json.action.changes.mark_false_positive %}\n-- Mark vulnerability finding with false positive in details JSON\nUPDATE vulnerability_findings \nSET details = jsonb_set(COALESCE(details, '{}'::jsonb), '{false_positive}', 'true'::jsonb)\nWHERE id::text = '{{ $json.target_id }}';\n\n-- Note: Increment false_positives in tool_success_metrics\n-- (Cannot determine tool_name from vulnerability_findings directly)\n{% endif %}\n\n{% if $json.action.changes.reduce_relevance or $json.action.changes.boost_relevance %}\nUPDATE knowledge_vectors\nSET relevance_score = GREATEST(0.1, LEAST(1.0, \n  relevance_score {{ $json.action.changes.reduce_relevance ? '- ' + $json.action.changes.reduce_relevance : '+ ' + ($json.action.changes.boost_relevance || 0) }}\n)),\nupdated_at = CURRENT_TIMESTAMP\nWHERE source_table = '{{ $json.target_table }}' \nAND source_id::text = '{{ $json.target_id }}';\n{% endif %}\n\n{% if $json.action.changes.reduce_pattern_confidence or $json.action.changes.boost_pattern_confidence %}\nUPDATE attack_patterns\nSET confidence_score = GREATEST(0.1, LEAST(1.0,\n  confidence_score {{ $json.action.changes.reduce_pattern_confidence ? '- 0.1' : '+ 0.05' }}\n)),\nupdated_at = CURRENT_TIMESTAMP\nWHERE id = (\n  SELECT (decision_output->>'pattern_id')::UUID \n  FROM agent_decisions \n  WHERE id = '{{ $json.target_id }}'\n);\n{% endif %}\n\n{% if $json.action.changes.increment_pattern_failure %}\nUPDATE attack_patterns\nSET failure_count = failure_count + 1,\n    last_failed_use = CURRENT_TIMESTAMP\nWHERE pattern_hash = (\n  SELECT pattern_hash FROM attack_patterns WHERE id = '{{ $json.target_id }}'\n);\n{% endif %}\n\n{% if $json.action.changes.increment_pattern_success %}\nUPDATE attack_patterns\nSET success_count = success_count + 1,\n    last_successful_use = CURRENT_TIMESTAMP\nWHERE pattern_hash = (\n  SELECT pattern_hash FROM attack_patterns WHERE id = '{{ $json.target_id }}'\n);\n{% endif %}\n\nSELECT 1;",
+        "options": {}
+      },
+      "name": "Apply Changes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1120, 200],
+      "id": "apply-changes",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE learning_feedback\nSET \n  processed = TRUE,\n  processed_at = CURRENT_TIMESTAMP,\n  applied_changes = '{{ JSON.stringify($json.action.changes) }}'::jsonb\nWHERE id = '{{ $json.id }}';\n\nSELECT 1;",
+        "options": {}
+      },
+      "name": "Mark as Processed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1340, 200],
+      "id": "mark-processed",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get feedback summary\nSELECT \n  feedback_type,\n  COUNT(*) as count,\n  ROUND(AVG(rating), 2) as avg_rating,\n  SUM(CASE WHEN is_correct = TRUE THEN 1 ELSE 0 END) as correct_count,\n  SUM(CASE WHEN is_useful = TRUE THEN 1 ELSE 0 END) as useful_count\nFROM learning_feedback\nWHERE processed = TRUE\n  AND processed_at > NOW() - INTERVAL '24 hours'\nGROUP BY feedback_type;",
+        "options": {}
+      },
+      "name": "Generate Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1560, 200],
+      "id": "summary",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={% set feedbacks = $('Generate Summary').all() %}\nINSERT INTO notifications (project_id, notification_type, severity, title, message, metadata)\nVALUES (\n  NULL,\n  'system',\n  'info',\n  'Feedback Processed',\n  'Processed {{ feedbacks | length }} feedback items in last 24h',\n  '{\"timestamp\": \"{{ $now }}\"}'::jsonb\n);",
+        "options": {}
+      },
+      "name": "Create Notification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1780, 200],
+      "id": "notification",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {"main": [[{"node": "Get Unprocessed Feedback", "type": "main", "index": 0}]]},
+    "Get Unprocessed Feedback": {"main": [[{"node": "Has Feedback", "type": "main", "index": 0}]]},
+    "Has Feedback": {"main": [[{"node": "Determine Actions", "type": "main", "index": 0}]]},
+    "Determine Actions": {"main": [[{"node": "Apply Changes", "type": "main", "index": 0}]]},
+    "Apply Changes": {"main": [[{"node": "Mark as Processed", "type": "main", "index": 0}]]},
+    "Mark as Processed": {"main": [[{"node": "Generate Summary", "type": "main", "index": 0}]]},
+    "Generate Summary": {"main": [[{"node": "Create Notification", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "tags": [{"id": "1", "name": "learning"}],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

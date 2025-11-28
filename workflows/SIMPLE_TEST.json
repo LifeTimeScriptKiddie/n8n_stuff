@@ -1,0 +1,57 @@
+{
+  "name": "Simple Test",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simple-test",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "simple-test-id",
+      "id": "webhook-simple"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      test: 'working',\n      received: $input.first().json\n    }\n  }\n];"
+      },
+      "name": "Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "id": "code-simple"
+    },
+    {
+      "parameters": {
+        "mode": "respondToWebhook",
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "response-simple"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Code", "type": "main", "index": 0}]]
+    },
+    "Code": {
+      "main": [[{"node": "Response", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-25T00:00:00.000Z",
+  "versionId": "1"
+}

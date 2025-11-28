@@ -19,17 +19,45 @@ RUN apk update && apk add --no-cache \
     nmap \
     nmap-scripts \
     bind-tools \
+    # SSH and tunnel tools (for pivot capability)
+    openssh-client \
+    sshpass \
+    proxychains-ng \
+    netcat-openbsd \
     # Python for future tool installs
     python3 \
     py3-pip \
     # Go language (for installing tools on demand)
     go \
     # Utilities
-    jq
+    jq \
+    ncurses
+
+# Configure default proxychains settings
+RUN mkdir -p /etc/proxychains && \
+    echo "strict_chain" > /etc/proxychains/proxychains.conf && \
+    echo "proxy_dns" >> /etc/proxychains/proxychains.conf && \
+    echo "tcp_read_time_out 15000" >> /etc/proxychains/proxychains.conf && \
+    echo "tcp_connect_time_out 8000" >> /etc/proxychains/proxychains.conf && \
+    echo "[ProxyList]" >> /etc/proxychains/proxychains.conf && \
+    echo "# Dynamic proxies added at runtime" >> /etc/proxychains/proxychains.conf
 
 # Install pipx for isolated Python tools
 RUN pip3 install --no-cache-dir --break-system-packages pipx && \
     pipx ensurepath
+
+# Install Azure CLI
+RUN apk add --no-cache --virtual .build-deps gcc musl-dev python3-dev libffi-dev openssl-dev cargo && \
+    pip3 install --no-cache-dir --break-system-packages azure-cli && \
+    apk del .build-deps
+
+# Install Python cloud security tools
+RUN apk add --no-cache --virtual .cloud-deps gcc g++ musl-dev python3-dev libffi-dev pkgconf && \
+    pip3 install --no-cache-dir --break-system-packages \
+    ScoutSuite \
+    roadlib \
+    roadrecon && \
+    apk del .cloud-deps
 
 # Create tool installer script (LLM can use this to install tools on demand)
 RUN echo '#!/bin/sh' > /usr/local/bin/install-tool && \
@@ -61,9 +89,18 @@ RUN cp /root/go/bin/* /usr/local/bin/
 # Update nuclei templates
 RUN nuclei -update-templates
 
-# Create workspace directories
+# Install Exploit-DB (searchsploit)
+RUN cd /opt && \
+    git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git && \
+    ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit && \
+    chmod +x /opt/exploitdb/searchsploit && \
+    chown -R node:node /opt/exploitdb && \
+    git config --global --add safe.directory /opt/exploitdb
+
+# Create workspace directories with proper permissions
 RUN mkdir -p /opt/recon-workspace /opt/loot && \
-    chmod -R 777 /opt/recon-workspace /opt/loot
+    chown -R node:node /opt/recon-workspace /opt/loot && \
+    chmod -R 755 /opt/recon-workspace /opt/loot
 
 # Set working directory back to n8n
 WORKDIR /home/node/.n8n

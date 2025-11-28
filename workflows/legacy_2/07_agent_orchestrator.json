@@ -1,0 +1,154 @@
+{
+  "name": "Agent Orchestrator (Master Coordinator)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent/orchestrate",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 400],
+      "webhookId": "agent-orchestrator",
+      "id": "webhook"
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body || $input.first().json;\nconst target = body.target;\nconst projectId = body.project_id;\nconst scanMode = body.scan_mode || 'standard';\n\nif (!target || !projectId) {\n  throw new Error('target and project_id required');\n}\n\n// Detect target type\nlet targetType = 'network';\nif (target.match(/^https?:\\/\\//)) {\n  targetType = 'web';\n} else if (target.includes('azure') || target.includes('aws') || target.includes('gcp')) {\n  targetType = 'cloud';\n} else if (target.includes('/api/') || body.api_spec_url) {\n  targetType = 'api';\n}\n\nreturn [{\n  json: {\n    target,\n    project_id: projectId,\n    scan_mode: scanMode,\n    target_type: targetType,\n    user_preferences: body.preferences || {},\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "id": "parse"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/rag-query",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "query", "value": "=Previous scans of {{ $json.target }} or similar {{ $json.target_type }} targets"},
+            {"name": "project_id", "value": "={{ $json.project_id }}"},
+            {"name": "limit", "value": "5"}
+          ]
+        },
+        "options": {}
+      },
+      "name": "Query RAG Knowledge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 400],
+      "id": "rag-query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_HOST }}/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3.2\",\n  \"prompt\": \"You are a penetration testing coordinator. Based on the target and historical knowledge, decide which agents to invoke and in what order.\\n\\nTarget: {{ $('Parse Input').item.json.target }}\\nType: {{ $('Parse Input').item.json.target_type }}\\nScan Mode: {{ $('Parse Input').item.json.scan_mode }}\\n\\nHistorical Context:\\n{{ $json.context_summary || 'No previous knowledge found' }}\\n\\nAvailable Agents:\\n- recon: Passive/active reconnaissance (subdomains, ports, services)\\n- web: Web application testing (XSS, SQLi, SSRF, fuzzing)\\n- network: Network exploitation (SMB, SSH, service exploits)\\n- cloud: Cloud security (Azure/AWS/GCP misconfigurations)\\n- api: API testing (REST/GraphQL security)\\n\\nRespond in JSON format:\\n{\\n  \\\"agents\\\": [\\\"agent1\\\", \\\"agent2\\\"],\\n  \\\"execution_order\\\": \\\"sequential|parallel\\\",\\n  \\\"reasoning\\\": \\\"explanation\\\",\\n  \\\"estimated_duration_minutes\\\": 30,\\n  \\\"requires_approval_after\\\": [\\\"recon\\\"]\\n}\",\n  \"stream\": false,\n  \"options\": {\"temperature\": 0.3}\n}",
+        "options": {"timeout": 120000}
+      },
+      "name": "AI Planning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 400],
+      "id": "ai-planning"
+    },
+    {
+      "parameters": {
+        "functionCode": "const aiResponse = $input.first().json.response;\nlet plan;\ntry {\n  const jsonMatch = aiResponse.match(/\\{[\\s\\S]*\\}/);\n  plan = JSON.parse(jsonMatch[0]);\n} catch(e) {\n  plan = {\n    agents: ['recon'],\n    execution_order: 'sequential',\n    reasoning: 'Defaulting to reconnaissance',\n    estimated_duration_minutes: 15,\n    requires_approval_after: []\n  };\n}\n\nconst originalInput = $('Parse Input').item.json;\nconst ragContext = $('Query RAG Knowledge').item.json;\n\nreturn [{\n  json: {\n    ...originalInput,\n    plan: plan,\n    rag_context: ragContext,\n    session_id: require('crypto').randomBytes(16).toString('hex')\n  }\n}];"
+      },
+      "name": "Parse AI Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "id": "parse-plan"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT record_agent_decision(\n  '{{ $json.project_id }}',\n  'orchestrator',\n  'agent_selection',\n  '{{ JSON.stringify({target: $json.target, target_type: $json.target_type}) }}',\n  '{{ JSON.stringify($json.plan) }}',\n  '{{ $json.plan.reasoning }}',\n  'llama3.2',\n  false,\n  0.8\n) as decision_id;",
+        "options": {}
+      },
+      "name": "Record Decision",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1340, 400],
+      "id": "record-decision",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\nconst agents = data.plan.agents || ['recon'];\n\nconst agentUrls = {\n  'recon': 'http://localhost:5678/webhook/agent/recon',\n  'web': 'http://localhost:5678/webhook/agent/web',\n  'network': 'http://localhost:5678/webhook/agent/network',\n  'cloud': 'http://localhost:5678/webhook/agent/cloud',\n  'api': 'http://localhost:5678/webhook/agent/api'\n};\n\nconst requests = agents.map(agent => ({\n  json: {\n    agent_name: agent,\n    url: agentUrls[agent],\n    payload: {\n      target: data.target,\n      project_id: data.project_id,\n      scan_mode: data.scan_mode,\n      session_id: data.session_id,\n      rag_context: data.rag_context.results || []\n    }\n  }\n}));\n\nreturn requests;"
+      },
+      "name": "Prepare Agent Calls",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400],
+      "id": "prepare-calls"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {"timeout": 600000}
+      },
+      "name": "Invoke Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 400],
+      "id": "invoke-agent",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "const results = $input.all();\nconst originalData = $('Parse Plan').item.json;\n\nconst summary = {\n  session_id: originalData.session_id,\n  target: originalData.target,\n  agents_invoked: results.length,\n  successful_agents: results.filter(r => r.json.success).length,\n  total_findings: results.reduce((sum, r) => sum + (r.json.findings_count || 0), 0),\n  agent_results: results.map(r => ({\n    agent: r.json.agent_name,\n    success: r.json.success,\n    findings: r.json.findings_count || 0,\n    duration_ms: r.json.duration_ms,\n    error: r.json.error\n  }))\n};\n\nreturn [{json: summary}];"
+      },
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 400],
+      "id": "aggregate"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {}
+      },
+      "name": "Return Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2220, 400],
+      "id": "response"
+    }
+  ],
+  "connections": {
+    "Webhook": {"main": [[{"node": "Parse Input", "type": "main", "index": 0}]]},
+    "Parse Input": {"main": [[{"node": "Query RAG Knowledge", "type": "main", "index": 0}]]},
+    "Query RAG Knowledge": {"main": [[{"node": "AI Planning", "type": "main", "index": 0}]]},
+    "AI Planning": {"main": [[{"node": "Parse AI Plan", "type": "main", "index": 0}]]},
+    "Parse AI Plan": {"main": [[{"node": "Record Decision", "type": "main", "index": 0}]]},
+    "Record Decision": {"main": [[{"node": "Prepare Agent Calls", "type": "main", "index": 0}]]},
+    "Prepare Agent Calls": {"main": [[{"node": "Invoke Agent", "type": "main", "index": 0}]]},
+    "Invoke Agent": {"main": [[{"node": "Aggregate Results", "type": "main", "index": 0}]]},
+    "Aggregate Results": {"main": [[{"node": "Return Response", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "tags": [{"id": "1", "name": "agent"}],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

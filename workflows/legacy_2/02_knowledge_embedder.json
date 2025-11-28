@@ -1,0 +1,640 @@
+{
+  "name": "Knowledge Embedder (RAG System)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "id": "schedule-trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Find completed scan jobs not yet embedded\nSELECT \n  sj.id,\n  sj.project_id,\n  sj.target,\n  sj.job_type,\n  sj.results,\n  sj.report,\n  sj.status,\n  sj.completed_at,\n  p.name as project_name,\n  p.scope\nFROM scan_jobs sj\nJOIN projects p ON sj.project_id = p.id\nWHERE sj.status = 'completed'\n  AND sj.completed_at > NOW() - INTERVAL '7 days'\n  AND NOT EXISTS (\n    SELECT 1 FROM knowledge_vectors kv \n    WHERE kv.source_table = 'scan_jobs' \n    AND kv.source_id = sj.id\n  )\nORDER BY sj.completed_at DESC\nLIMIT 50;",
+        "options": {}
+      },
+      "name": "Get Unembedded Scan Jobs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        460,
+        300
+      ],
+      "id": "get-unembedded-scans",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Check If Any Results",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "id": "check-results"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Chunk scan results into semantic segments for embedding\nconst items = [];\n\nfor (const item of $input.all()) {\n  const scanJob = item.json;\n  \n  // Extract meaningful content\n  const target = scanJob.target || 'unknown';\n  const jobType = scanJob.job_type || 'scan';\n  const results = scanJob.results || {};\n  const aiReport = scanJob.report || '';\n  const projectName = scanJob.project_name || '';\n  \n  // Create chunks based on content type\n  const chunks = [];\n  \n  // Chunk 1: Executive summary with AI report\n  if (aiReport && aiReport.length > 50) {\n    chunks.push({\n      type: 'ai_report',\n      content: `Project: ${projectName}\\nTarget: ${target}\\nScan Type: ${jobType}\\n\\nAI Analysis:\\n${aiReport}`,\n      metadata: {\n        chunk_type: 'executive_summary',\n        target: target,\n        job_type: jobType,\n        has_findings: results.findings_count > 0\n      }\n    });\n  }\n  \n  // Chunk 2: Command outputs (if valuable)\n  if (results.commands && Array.isArray(results.commands)) {\n    for (const cmd of results.commands) {\n      if (cmd.output && cmd.output.length > 100) {\n        // Only embed substantial outputs\n        const content = `Command: ${cmd.command}\\nTarget: ${target}\\nOutput:\\n${cmd.output.substring(0, 2000)}`;\n        \n        chunks.push({\n          type: 'command_output',\n          content: content,\n          metadata: {\n            chunk_type: 'tool_output',\n            tool_name: cmd.command.split(' ')[0],\n            target: target,\n            success: cmd.exit_code === 0\n          }\n        });\n      }\n    }\n  }\n  \n  // Chunk 3: Findings summary (if any)\n  if (results.findings && Array.isArray(results.findings)) {\n    for (const finding of results.findings) {\n      const content = `Finding: ${finding.title || finding.name}\\nTarget: ${target}\\nSeverity: ${finding.severity}\\nDescription: ${finding.description || ''}\\nRemediation: ${finding.remediation || ''}`;\n      \n      chunks.push({\n        type: 'finding',\n        content: content,\n        metadata: {\n          chunk_type: 'vulnerability',\n          severity: finding.severity,\n          target: target,\n          cve: finding.cve || null\n        }\n      });\n    }\n  }\n  \n  // Chunk 4: Tool chain summary\n  if (results.commands && results.commands.length > 0) {\n    const toolChain = results.commands.map(c => c.command.split(' ')[0]).join(' → ');\n    const successCount = results.commands.filter(c => c.exit_code === 0).length;\n    const totalCount = results.commands.length;\n    \n    const content = `Tool Chain Analysis:\\nTarget: ${target}\\nJob Type: ${jobType}\\nTools Used: ${toolChain}\\nSuccess Rate: ${successCount}/${totalCount}\\nFindings: ${results.findings_count || 0}`;\n    \n    chunks.push({\n      type: 'tool_chain',\n      content: content,\n      metadata: {\n        chunk_type: 'attack_pattern',\n        tool_chain: toolChain,\n        success_rate: (successCount / totalCount * 100).toFixed(2),\n        findings_count: results.findings_count || 0\n      }\n    });\n  }\n  \n  // Add all chunks as separate items for embedding\n  for (let i = 0; i < chunks.length; i++) {\n    items.push({\n      json: {\n        scan_job_id: scanJob.id,\n        project_id: scanJob.project_id,\n        chunk_index: i,\n        total_chunks: chunks.length,\n        ...chunks[i],\n        scan_completed_at: scanJob.completed_at\n      }\n    });\n  }\n}\n\nreturn items;"
+      },
+      "name": "Chunk Scan Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ],
+      "id": "chunk-results"
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "name": "Batch Chunks",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        200
+      ],
+      "id": "batch-chunks"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_HOST }}/api/embeddings",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "nomic-embed-text"
+            },
+            {
+              "name": "prompt",
+              "value": "={{ $json.content }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "name": "Generate Embedding (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        200
+      ],
+      "id": "generate-embedding"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare data for Chroma and PostgreSQL\nconst item = $input.first();\nconst embedding = item.json.embedding;\nconst originalData = $('Batch Chunks').item.json;\n\n// Generate unique ID for Chroma\nconst chromaId = `scan_${originalData.scan_job_id}_chunk_${originalData.chunk_index}`;\n\n// Prepare metadata for Chroma\nconst chromaMetadata = {\n  source_table: 'scan_jobs',\n  source_id: originalData.scan_job_id,\n  project_id: originalData.project_id,\n  chunk_type: originalData.metadata.chunk_type,\n  target: originalData.metadata.target,\n  scan_completed_at: originalData.scan_completed_at\n};\n\n// Add type-specific metadata\nif (originalData.type === 'finding') {\n  chromaMetadata.severity = originalData.metadata.severity;\n  chromaMetadata.has_cve = originalData.metadata.cve !== null;\n}\n\nif (originalData.type === 'tool_chain') {\n  chromaMetadata.success_rate = originalData.metadata.success_rate;\n  chromaMetadata.findings_count = originalData.metadata.findings_count;\n}\n\nreturn [{\n  json: {\n    // For Chroma\n    chroma_id: chromaId,\n    embedding: embedding,\n    content: originalData.content,\n    metadata: chromaMetadata,\n    \n    // For PostgreSQL\n    scan_job_id: originalData.scan_job_id,\n    project_id: originalData.project_id,\n    source_type: originalData.type,\n    chunk_index: originalData.chunk_index,\n    chunk_metadata: originalData.metadata\n  }\n}];"
+      },
+      "name": "Prepare Chroma Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        200
+      ],
+      "id": "prepare-chroma-data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CHROMA_HOST }}/api/v1/collections/{{ $env.CHROMA_COLLECTION_PENTEST }}/add",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ids\": [\"{{ $json.chroma_id }}\"],\n  \"embeddings\": [{{ $json.embedding }}],\n  \"documents\": [\"{{ $json.content.replace(/\"/g, '\\\\\"').replace(/\\n/g, '\\\\n') }}\"],\n  \"metadatas\": [{{ JSON.stringify($json.metadata) }}]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Store in Chroma Vector DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        200
+      ],
+      "id": "store-chroma",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO knowledge_vectors (\n  project_id,\n  source_table,\n  source_id,\n  source_type,\n  content_text,\n  chroma_id,\n  chroma_collection,\n  embedding_model,\n  embedding_dimension,\n  metadata,\n  tags\n) VALUES (\n  '{{ $json.project_id }}',\n  'scan_jobs',\n  '{{ $json.scan_job_id }}',\n  '{{ $json.source_type }}',\n  '{{ $json.content.replace(/'/g, \"''\") }}',\n  '{{ $json.chroma_id }}',\n  '{{ $env.CHROMA_COLLECTION_PENTEST }}',\n  'nomic-embed-text',\n  768,\n  '{{ JSON.stringify($json.chunk_metadata) }}',\n  ARRAY['{{ $json.source_type }}', '{{ $json.chunk_metadata.chunk_type }}']\n)\nON CONFLICT (source_table, source_id, embedding_model) \nDO UPDATE SET\n  updated_at = CURRENT_TIMESTAMP,\n  citation_count = knowledge_vectors.citation_count + 1;",
+        "options": {}
+      },
+      "name": "Store in PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        2000,
+        200
+      ],
+      "id": "store-postgres",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "name": "Loop Back to Batch",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        200
+      ],
+      "id": "loop-back"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Also embed vulnerability findings that don't have embeddings yet\nSELECT \n  f.id,\n  f.session_id,\n  f.vuln_type as title,\n  f.description,\n  f.severity,\n  f.risk_score as cvss_score,\n  f.host,\n  f.url,\n  f.details\nFROM vulnerability_findings f\nWHERE f.created_at > NOW() - INTERVAL '7 days'\n  AND NOT EXISTS (\n    SELECT 1 FROM knowledge_vectors kv \n    WHERE kv.source_table = 'vulnerability_findings' \n    AND kv.source_id::text = f.id::text\n  )\nORDER BY \n  CASE f.severity \n    WHEN 'critical' THEN 1\n    WHEN 'high' THEN 2\n    WHEN 'medium' THEN 3\n    WHEN 'low' THEN 4\n    ELSE 5\n  END,\n  f.created_at DESC\nLIMIT 50;",
+        "options": {}
+      },
+      "name": "Get Unembedded Findings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        900,
+        400
+      ],
+      "id": "get-findings",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Create embedding-ready content from vulnerability findings\nconst items = [];\n\nfor (const item of $input.all()) {\n  const finding = item.json;\n  \n  // Build comprehensive finding description\n  const target = finding.host || finding.url || 'Unknown';\n  const location = finding.url || finding.host || 'Unknown location';\n  \n  let content = `Vulnerability Finding:\\n`;\n  content += `Title: ${finding.title}\\n`;\n  content += `Location: ${location}\\n`;\n  content += `Severity: ${finding.severity}\\n`;\n  \n  if (finding.cvss_score) {\n    content += `Risk Score: ${finding.cvss_score}\\n`;\n  }\n  \n  content += `\\nDescription:\\n${finding.description || 'N/A'}\\n`;\n  \n  // Add details from JSONB if available\n  if (finding.details && typeof finding.details === 'object') {\n    const details = typeof finding.details === 'string' ? JSON.parse(finding.details) : finding.details;\n    \n    if (details.remediation) {\n      content += `\\nRemediation:\\n${details.remediation}\\n`;\n    }\n    \n    if (details.cve_ids && Array.isArray(details.cve_ids)) {\n      content += `CVEs: ${details.cve_ids.join(', ')}\\n`;\n    }\n    \n    if (details.evidence) {\n      content += `\\nEvidence: ${JSON.stringify(details.evidence, null, 2)}\\n`;\n    }\n  }\n  \n  items.push({\n    json: {\n      finding_id: finding.id,\n      session_id: finding.session_id,\n      content: content,\n      metadata: {\n        chunk_type: 'vulnerability',\n        severity: finding.severity,\n        target: target,\n        vuln_type: finding.title,\n        risk_score: finding.cvss_score\n      }\n    }\n  });\n}\n\nreturn items;"
+      },
+      "name": "Format Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ],
+      "id": "format-findings"
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "name": "Batch Findings",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1340,
+        400
+      ],
+      "id": "batch-findings"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_HOST }}/api/embeddings",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "nomic-embed-text"
+            },
+            {
+              "name": "prompt",
+              "value": "={{ $json.content }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "name": "Embed Finding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        400
+      ],
+      "id": "embed-finding"
+    },
+    {
+      "parameters": {
+        "functionCode": "const item = $input.first();\nconst embedding = item.json.embedding;\nconst originalData = $('Batch Findings').item.json;\n\nconst chromaId = `finding_${originalData.finding_id}`;\n\nconst chromaMetadata = {\n  source_table: 'vulnerability_findings',\n  source_id: originalData.finding_id,\n  session_id: originalData.session_id,\n  chunk_type: 'vulnerability',\n  severity: originalData.metadata.severity,\n  target: originalData.metadata.target,\n  vuln_type: originalData.metadata.vuln_type\n};\n\nreturn [{\n  json: {\n    chroma_id: chromaId,\n    embedding: embedding,\n    content: originalData.content,\n    metadata: chromaMetadata,\n    finding_id: originalData.finding_id,\n    session_id: originalData.session_id,\n    source_type: 'vulnerability',\n    chunk_metadata: originalData.metadata\n  }\n}];"
+      },
+      "name": "Prepare Finding for Storage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        400
+      ],
+      "id": "prepare-finding"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CHROMA_HOST }}/api/v1/collections/{{ $env.CHROMA_COLLECTION_PENTEST }}/add",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ids\": [\"{{ $json.chroma_id }}\"],\n  \"embeddings\": [{{ $json.embedding }}],\n  \"documents\": [\"{{ $json.content.replace(/\"/g, '\\\\\"').replace(/\\n/g, '\\\\n') }}\"],\n  \"metadatas\": [{{ JSON.stringify($json.metadata) }}]\n}",
+        "options": {}
+      },
+      "name": "Store Finding in Chroma",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2000,
+        400
+      ],
+      "id": "store-finding-chroma",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO knowledge_vectors (\n  source_table,\n  source_id,\n  source_type,\n  content_text,\n  chroma_id,\n  chroma_collection,\n  embedding_model,\n  embedding_dimension,\n  metadata,\n  tags\n) VALUES (\n  'vulnerability_findings',\n  '{{ $json.finding_id }}',\n  'vulnerability',\n  '{{ $json.content.replace(/'/g, \"''\") }}',\n  '{{ $json.chroma_id }}',\n  '{{ $env.CHROMA_COLLECTION_PENTEST }}',\n  'nomic-embed-text',\n  768,\n  '{{ JSON.stringify($json.chunk_metadata) }}',\n  ARRAY['vulnerability', '{{ $json.chunk_metadata.severity }}']\n)\nON CONFLICT (source_table, source_id, embedding_model) \nDO UPDATE SET\n  updated_at = CURRENT_TIMESTAMP;",
+        "options": {}
+      },
+      "name": "Store Finding in PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        2220,
+        400
+      ],
+      "id": "store-finding-postgres",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "name": "Loop Back Findings",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2440,
+        400
+      ],
+      "id": "loop-back-findings"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Create Chroma collection if not exists (initialization)\nSELECT 1;",
+        "options": {}
+      },
+      "name": "Initialize Chroma Collection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        500
+      ],
+      "id": "init-chroma",
+      "continueOnFail": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CHROMA_HOST }}/api/v1/collections",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"{{ $env.CHROMA_COLLECTION_PENTEST }}\",\n  \"metadata\": {\n    \"description\": \"Penetration testing knowledge base for RAG\",\n    \"embedding_model\": \"nomic-embed-text\",\n    \"dimension\": 768\n  },\n  \"get_or_create\": true\n}",
+        "options": {}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Generate summary statistics\nSELECT \n  COUNT(*) as total_vectors,\n  COUNT(DISTINCT project_id) as projects_with_knowledge,\n  COUNT(DISTINCT source_table) as source_types,\n  AVG(relevance_score) as avg_relevance,\n  SUM(citation_count) as total_citations\nFROM knowledge_vectors;",
+        "options": {}
+      },
+      "name": "Generate Statistics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        2440,
+        200
+      ],
+      "id": "stats",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "resource": "notification",
+        "additionalFields": {
+          "message": "=Knowledge Embedder completed successfully\\n\\nTotal Vectors: {{ $json.total_vectors }}\\nProjects: {{ $json.projects_with_knowledge }}\\nAverage Relevance: {{ $json.avg_relevance }}\\nTotal Citations: {{ $json.total_citations }}",
+          "severity": "info",
+          "notification_type": "system"
+        }
+      },
+      "name": "Create Success Notification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        2660,
+        200
+      ],
+      "id": "success-notification",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      },
+      "continueOnFail": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO notifications (project_id, notification_type, severity, title, message, metadata) VALUES (NULL, 'system', 'info', 'Knowledge Embedder Completed', 'Total Vectors: {{ $json.total_vectors }}\\nProjects: {{ $json.projects_with_knowledge }}', '{}');",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Initialize Chroma Collection",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Unembedded Scan Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unembedded Scan Jobs": {
+      "main": [
+        [
+          {
+            "node": "Check If Any Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Any Results": {
+      "main": [
+        [
+          {
+            "node": "Chunk Scan Results",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Unembedded Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Scan Results": {
+      "main": [
+        [
+          {
+            "node": "Batch Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Chunks": {
+      "main": [
+        [
+          {
+            "node": "Generate Embedding (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Embedding (Ollama)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Chroma Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Chroma Data": {
+      "main": [
+        [
+          {
+            "node": "Store in Chroma Vector DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Chroma Vector DB": {
+      "main": [
+        [
+          {
+            "node": "Store in PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in PostgreSQL": {
+      "main": [
+        [
+          {
+            "node": "Batch Chunks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Statistics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unembedded Findings": {
+      "main": [
+        [
+          {
+            "node": "Format Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Findings": {
+      "main": [
+        [
+          {
+            "node": "Batch Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Findings": {
+      "main": [
+        [
+          {
+            "node": "Embed Finding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Finding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Finding for Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Finding for Storage": {
+      "main": [
+        [
+          {
+            "node": "Store Finding in Chroma",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Finding in Chroma": {
+      "main": [
+        [
+          {
+            "node": "Store Finding in PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Finding in PostgreSQL": {
+      "main": [
+        [
+          {
+            "node": "Batch Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Statistics": {
+      "main": [
+        [
+          {
+            "node": "Create Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "id": "1",
+      "name": "rag-system"
+    },
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "id": "2",
+      "name": "learning"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

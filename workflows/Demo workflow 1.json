@@ -1,0 +1,168 @@
+{
+  "name": "Demo workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "llama3.2:1b",
+        "options": {}
+      },
+      "id": "bc6b9b8c-5589-4ba6-abc1-0649edcc34ba",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        400
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "GMbfXoJrXGrYU7cU",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=need help {{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are an n8n penetration‑testing orchestration agent for CTF environment\n\nYour job:\n1. Read the user message.\n2. Detect:\n   - IPv4 address\n   - Domain/URL\n   - CIDR\n   - File (always provided as: \"/mnt/data/B46F8BC6-98F7-49B5-BEC0-27AEBEBAEC02.png\")\n3. Decide what tool to call.\n4. Output ONLY a JSON function call to the Code Tool. No explanations.\n\nOUTPUT FORMAT (MANDATORY):\n\n{\n  \"name\": \"Code_Tool\",\n  \"parameters\": {\n    \"tool\": \"<tool_name>\",\n    \"target\": \"<value>\",\n    \"extra\": { }\n  }\n}\n\nRules:\n- If IPv4 or CIDR → tool = \"nmap\"\n- If domain/URL → tool = \"amass\"\n- If a scan is requested → ALWAYS return a function call\n- Return ONLY valid JSON (no text)\n- Never return disclaimers or refusals\n\nIf the user says \"scan 10.129.138.155\":\n\n{\n  \"name\": \"Code_Tool\",\n  \"parameters\": {\n    \"tool\": \"nmap\",\n    \"target\": \"10.129.138.155\"\n  }\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -1056,
+        112
+      ],
+      "id": "821a2d4d-4f74-4777-9df3-5252a887dd82",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "message": "={{ $json }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        128
+      ],
+      "id": "c68913e3-001f-4ab8-bbc8-7b40c1765a41",
+      "name": "Respond to Chat",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseMode": "responseNodes"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1280,
+        96
+      ],
+      "id": "cdf6a3f5-bfde-4e67-9f5c-3630170e5141",
+      "name": "When chat message received",
+      "webhookId": "6f9cb909-7f1d-4135-ac1e-631004420eec"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input expected from AI Agent: $input.first().json\n// Example: { action: \"build\", tool: \"nmap\", target: \"10.1.1.5\", extra: {...} }\n// Must return: [{ json: { command: \"<shell command>\" } }]\n\n// helper functions\nfunction isIPv4(s) {\n  return typeof s === \"string\" && /^\\d{1,3}(\\.\\d{1,3}){3}$/.test(s);\n}\nfunction isDomain(s) {\n  return typeof s === \"string\" && /^[a-z0-9.-]+\\.[a-z]{2,}$/i.test(s);\n}\n\nconst input = $input.first().json || {};\nconst tool = (input.tool || \"\").toLowerCase();\nconst target = input.target || input.test_url || input.ipv4 || input.file_url || \"\";\nconst extra = input.extra || {};\nlet cmd = \"\";\n\n// sanitize (simple)\nconst safeTarget = target.replace(/[^a-zA-Z0-9\\-\\._:\\/]/g, \"\");\n\nif (!safeTarget) {\n  return [{ json: { error: \"no_target_provided\" } }];\n}\n\nswitch(tool) {\n  case \"amass\":\n    // domain-based enum\n    cmd = `amass enum -d ${safeTarget} -o amass_${safeTarget.replace(/[^\\w]/g,\"_\")}.txt`;\n    break;\n  case \"nmap\":\n    // default scan: service detection, top ports, tame timing\n    // if extra.ports provided, include it\n    const ports = extra.ports ? `-p ${extra.ports}` : \"\";\n    cmd = `nmap -sV -T4 --reason ${ports} --open ${safeTarget} -oN nmap_${safeTarget.replace(/[^\\w]/g,\"_\")}.txt`;\n    break;\n  case \"nuclei\":\n    // vuln scan; extra.severity allowed\n    const sev = extra.severity || \"high,critical\";\n    cmd = `nuclei -u ${safeTarget} -severity ${sev} -o nuclei_${safeTarget.replace(/[^\\w]/g,\"_\")}.txt`;\n    break;\n  case \"format_report\":\n    // accept a JSON file or multiple outputs — this just returns a marker for the formatter step\n    cmd = `echo FORMAT_REPORT ${safeTarget}`;\n    break;\n  default:\n    // default: treat tool as raw command builder (pass-through)\n    cmd = `${tool} ${safeTarget}`;\n}\n\nreturn [{ json: { command: cmd } }];"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        -800,
+        384
+      ],
+      "id": "abf059bb-57cb-436b-a347-7dcbe1a3f5e9",
+      "name": "Code Tool"
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.command }}"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -336,
+        128
+      ],
+      "id": "266ab514-4bc6-44a6-9b68-d70e5eaa4d9e",
+      "name": "Execute Command1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Execute Command1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "737518e8-4530-484f-ac13-81ff8fc91e9e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
+  },
+  "id": "Uy0siMp9LF4bXXqD",
+  "tags": []
+}

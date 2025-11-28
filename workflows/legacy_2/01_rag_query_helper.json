@@ -1,0 +1,224 @@
+{
+  "name": "RAG Query Helper",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag-query",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "rag-query-helper",
+      "id": "webhook-trigger"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract query parameters\nconst body = $input.first().json.body || $input.first().json;\n\nconst query = body.query || '';\nconst projectId = body.project_id || null;\nconst sourceType = body.source_type || null;\nconst limit = body.limit || 5;\nconst minRelevance = body.min_relevance || 0.7;\n\nif (!query) {\n  throw new Error('Query parameter is required');\n}\n\nreturn [{\n  json: {\n    query: query,\n    project_id: projectId,\n    source_type: sourceType,\n    limit: limit,\n    min_relevance: minRelevance\n  }\n}];"
+      },
+      "name": "Parse Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "id": "parse-request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OLLAMA_HOST }}/api/embeddings",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "nomic-embed-text"
+            },
+            {
+              "name": "prompt",
+              "value": "={{ $json.query }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Embed Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "id": "embed-query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CHROMA_HOST }}/api/v1/collections/{{ $env.CHROMA_COLLECTION_PENTEST }}/query",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query_embeddings\": [{{ $json.embedding }}],\n  \"n_results\": {{ $('Parse Request').item.json.limit }},\n  \"where\": {{ $('Parse Request').item.json.project_id ? '{\"project_id\": \"' + $('Parse Request').item.json.project_id + '\"}' : '{}' }},\n  \"include\": [\"documents\", \"metadatas\", \"distances\"]\n}",
+        "options": {}
+      },
+      "name": "Query Chroma",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "id": "query-chroma"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process Chroma results and fetch full context from PostgreSQL\nconst chromaResults = $input.first().json;\nconst query = $('Parse Request').item.json.query;\nconst minRelevance = $('Parse Request').item.json.min_relevance;\n\nif (!chromaResults.documents || chromaResults.documents.length === 0) {\n  return [{\n    json: {\n      query: query,\n      results: [],\n      context_summary: 'No relevant knowledge found in the database.',\n      total_results: 0\n    }\n  }];\n}\n\n// Chroma returns distances (lower is better)\n// Convert to similarity scores (higher is better)\nconst documents = chromaResults.documents[0];\nconst metadatas = chromaResults.metadatas[0];\nconst distances = chromaResults.distances[0];\n\nconst results = [];\nlet contextText = '';\n\nfor (let i = 0; i < documents.length; i++) {\n  // Convert distance to similarity (simple inversion)\n  const similarity = 1 / (1 + distances[i]);\n  \n  // Filter by minimum relevance\n  if (similarity < minRelevance) {\n    continue;\n  }\n  \n  const result = {\n    content: documents[i],\n    metadata: metadatas[i],\n    similarity_score: similarity.toFixed(4),\n    distance: distances[i].toFixed(4),\n    rank: i + 1\n  };\n  \n  results.push(result);\n  \n  // Build context for LLM\n  contextText += `\\n\\n[Relevant Context ${i + 1}] (Similarity: ${(similarity * 100).toFixed(1)}%)\\n`;\n  contextText += documents[i];\n}\n\n// Create summary for LLM prompt augmentation\nlet contextSummary = '';\nif (results.length > 0) {\n  contextSummary = `Found ${results.length} relevant pieces of knowledge from past operations:\\n`;\n  contextSummary += contextText;\n} else {\n  contextSummary = 'No sufficiently relevant knowledge found (all results below relevance threshold).';\n}\n\nreturn [{\n  json: {\n    query: query,\n    results: results,\n    context_text: contextText,\n    context_summary: contextSummary,\n    total_results: results.length,\n    min_relevance_used: minRelevance\n  }\n}];"
+      },
+      "name": "Process Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ],
+      "id": "process-results"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Update citation counts for retrieved knowledge\n{% for result in $json.results %}\nUPDATE knowledge_vectors \nSET \n  citation_count = citation_count + 1,\n  last_accessed = CURRENT_TIMESTAMP\nWHERE chroma_id = '{{ result.metadata.source_id }}';\n{% endfor %}\n\nSELECT 1;",
+        "options": {}
+      },
+      "name": "Update Citation Counts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1340,
+        300
+      ],
+      "id": "update-citations",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Process Results').item.json, null, 2) }}",
+        "options": {}
+      },
+      "name": "Return Results",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        300
+      ],
+      "id": "return-results"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Request": {
+      "main": [
+        [
+          {
+            "node": "Embed Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Query": {
+      "main": [
+        [
+          {
+            "node": "Query Chroma",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Chroma": {
+      "main": [
+        [
+          {
+            "node": "Process Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Results": {
+      "main": [
+        [
+          {
+            "node": "Update Citation Counts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Citation Counts": {
+      "main": [
+        [
+          {
+            "node": "Return Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "id": "1",
+      "name": "rag-system"
+    },
+    {
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "id": "2",
+      "name": "helper"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

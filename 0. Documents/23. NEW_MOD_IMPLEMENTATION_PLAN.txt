@@ -1,0 +1,596 @@
+# NEW_MOD IMPLEMENTATION PLAN
+# Detailed Analysis & Step-by-Step Implementation Guide
+
+================================================================================
+## 1. EXECUTIVE SUMMARY
+================================================================================
+
+This plan analyzes the gap between the proposed enterprise pentest architecture
+(new_mod.txt) and the current pentest_router.json workflow, then provides a
+phased implementation roadmap.
+
+**Bottom Line:** The current system is a simple "scan-and-report" tool. The
+proposed architecture is an enterprise-grade data platform requiring significant
+infrastructure, database schema, and workflow additions.
+
+================================================================================
+## 2. CURRENT CAPABILITY ANALYSIS (pentest_router.json)
+================================================================================
+
+### What It Does:
+- Webhook endpoint receives scan requests (POST /webhook/pentest)
+- Routes to v1 (basic) or v2 (advanced) AI planner via Ollama
+- AI determines target type and generates tool commands
+- Executes commands sequentially in Docker container
+- AI generates markdown report from results
+- Returns report via webhook response
+
+### Current Flow:
+```
+Webhook → Route Version → AI Planner → Parse → Loop Commands → Execute → Aggregate → AI Report → Response
+```
+
+### Tools Currently Supported:
+**v1 (Basic):** subfinder, nmap, httpx, nuclei, whois, dig
+**v2 (Advanced):** + amass, dnsrecon, fierce, gobuster, whatweb, testssl.sh,
+                    theHarvester, waybackurls, trufflehog, gitleaks, AWS S3
+
+### Critical Gaps vs new_mod.txt:
+
+| Capability                  | Current | Required | Gap Severity |
+|-----------------------------|---------|----------|--------------|
+| Data Persistence            | ❌      | ✅       | CRITICAL     |
+| PostgreSQL Storage          | ❌      | ✅       | CRITICAL     |
+| Redis Queuing               | ❌      | ✅       | HIGH         |
+| MinIO Object Storage        | ❌      | ✅       | HIGH         |
+| Credential Security/Hashing | ❌      | ✅       | CRITICAL     |
+| Multi-tenant (project_id)   | ❌      | ✅       | HIGH         |
+| RBAC                        | ❌      | ✅       | MEDIUM       |
+| ROE Gates/Approvals         | ❌      | ✅       | HIGH         |
+| Rate Limiting               | ❌      | ✅       | MEDIUM       |
+| Enrichment Pipeline         | ❌      | ✅       | MEDIUM       |
+| Evidence Immutability       | ❌      | ✅       | HIGH         |
+| KMS/Vault Integration       | ❌      | ✅       | HIGH         |
+| Monitoring/Metrics          | ❌      | ✅       | MEDIUM       |
+
+================================================================================
+## 3. PROPOSED ARCHITECTURE REQUIREMENTS (new_mod.txt)
+================================================================================
+
+### 3.1 Core Pillars:
+1. **Data Discipline** - scope, retention, secrets, evidence chain
+2. **Credential Security** - hash in DB, encrypted ephemeral in Redis, KMS
+3. **Controlled Automation** - ROE gates, rate limits, approval flows
+
+### 3.2 Infrastructure Requirements:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   n8n       │────▶│  PostgreSQL │     │   MinIO     │
+│  Workflows  │     │  (Truth)    │     │  (Objects)  │
+└─────────────┘     └─────────────┘     └─────────────┘
+       │                   │                   │
+       ▼                   ▼                   │
+┌─────────────┐     ┌─────────────┐           │
+│   Redis     │     │  KMS/Vault  │◀──────────┘
+│  (Queues)   │     │  (Secrets)  │
+└─────────────┘     └─────────────┘
+```
+
+### 3.3 Data Model Required:
+
+```
+Project → Host → Port → Service → Findings → Credentials → CredentialUsage → Relationships → ScanHistory → Loot
+```
+
+### 3.4 Workflows Required:
+
+1. **Ingest Workflow** - Raw file → MinIO → PG → queue parsing
+2. **Parse & Normalize** - Extract objects → upsert → enrich → queue cred test
+3. **Credential Tester** - Decrypt ephemeral → test → update → delete plaintext
+4. **Pivot Agent** - On success → propose reuse → enforce ROE → queue tests
+5. **Daily Housekeeping** - TTL, snapshots, compress evidence
+6. **Notification** - Critical vuln/pivot → Slack/Email
+7. **Manual Review** - Approval for high-risk actions
+
+================================================================================
+## 4. GAP ANALYSIS DETAIL
+================================================================================
+
+### 4.1 Data Persistence Gap
+
+**Current:** Results returned via webhook, no storage
+**Required:** Full data lifecycle management
+
+Missing:
+- [ ] PostgreSQL schema for all entities
+- [ ] Raw evidence stored in MinIO with checksums
+- [ ] Parsed data in structured PG tables
+- [ ] Relationship graph between entities
+- [ ] Audit trail for all operations
+
+### 4.2 Credential Security Gap
+
+**Current:** Not handled at all
+**Required:** Enterprise-grade credential management
+
+Missing:
+- [ ] Argon2id hashing for credentials in PG
+- [ ] Redis ephemeral encrypted storage (TTL < 600s)
+- [ ] KMS for encryption/decryption keys
+- [ ] Isolated credential-tester container
+- [ ] Provenance tracking (where found, confidence)
+- [ ] Usage tracking (where tested, success/fail)
+
+### 4.3 Queue/Async Processing Gap
+
+**Current:** Synchronous execution, blocking webhook
+**Required:** Async job queue system
+
+Missing:
+- [ ] Redis-based job queues
+- [ ] Background workers
+- [ ] Job status tracking
+- [ ] Retry logic
+- [ ] Dead letter queues
+
+### 4.4 Access Control Gap
+
+**Current:** No authentication/authorization
+**Required:** Full RBAC system
+
+Missing:
+- [ ] User roles (Admin/Analyst/Reviewer)
+- [ ] Project-level permissions
+- [ ] API key management
+- [ ] Audit logging
+
+### 4.5 Safety Controls Gap
+
+**Current:** No limits or gates
+**Required:** Comprehensive safety controls
+
+Missing:
+- [ ] Global rate limits
+- [ ] Per-target rate limits
+- [ ] ROE (Rules of Engagement) enforcement
+- [ ] Approval workflows for risky actions
+- [ ] Time-window restrictions
+
+================================================================================
+## 5. IMPLEMENTATION PLAN - PHASED APPROACH
+================================================================================
+
+### PHASE A: MVP (Core Data Infrastructure)
+**Estimated Effort: Foundation layer**
+
+#### A1. Infrastructure Setup
+- [ ] Add PostgreSQL container to docker-compose (if not exists)
+- [ ] Add Redis container to docker-compose
+- [ ] Add MinIO container for object storage
+- [ ] Configure networking between services
+
+#### A2. PostgreSQL Schema - Core Tables
+```sql
+-- Projects table (multi-tenant root)
+CREATE TABLE projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    scope JSONB,
+    roe JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Hosts table
+CREATE TABLE hosts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id),
+    ip_address INET,
+    hostname VARCHAR(255),
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(project_id, ip_address, hostname)
+);
+
+-- Ports table
+CREATE TABLE ports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    host_id UUID REFERENCES hosts(id),
+    port INTEGER NOT NULL,
+    protocol VARCHAR(10) DEFAULT 'tcp',
+    state VARCHAR(20),
+    service_name VARCHAR(100),
+    service_version VARCHAR(255),
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(host_id, port, protocol)
+);
+
+-- Raw evidence storage
+CREATE TABLE evidence (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id),
+    minio_path VARCHAR(500) NOT NULL,
+    file_hash VARCHAR(128) NOT NULL,
+    file_type VARCHAR(50),
+    parser_status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Scan history
+CREATE TABLE scan_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id),
+    tool_name VARCHAR(100),
+    command TEXT,
+    evidence_id UUID REFERENCES evidence(id),
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    status VARCHAR(20),
+    metadata JSONB
+);
+```
+
+#### A3. MinIO Configuration
+- [ ] Create buckets: raw-evidence, parsed-output, reports
+- [ ] Configure retention policies
+- [ ] Set up access credentials
+
+#### A4. Basic Ingest Workflow
+- [ ] Create new workflow: "Evidence Ingest"
+- [ ] Accept file uploads via webhook
+- [ ] Store raw file in MinIO
+- [ ] Calculate checksum
+- [ ] Create evidence record in PG
+- [ ] Queue for parsing
+
+#### A5. Nmap XML Parser Workflow
+- [ ] Create new workflow: "Parse Nmap XML"
+- [ ] Pull from parsing queue
+- [ ] Extract hosts/ports/services
+- [ ] Upsert to PG tables
+- [ ] Link to raw evidence
+
+#### A6. Modify pentest_router.json
+- [ ] Add project_id to webhook input
+- [ ] Store scan_history in PG
+- [ ] Store results in PG instead of just returning
+- [ ] Save raw output to MinIO
+
+#### A7. Daily Rollup Workflow
+- [ ] Create scheduled workflow
+- [ ] Expire TTL'd data
+- [ ] Generate summary metrics
+- [ ] Compress old evidence
+
+---
+
+### PHASE B: Automated Credential Testing
+**Estimated Effort: Security-critical layer**
+
+#### B1. Credential Tables
+```sql
+-- Credentials table (hashed storage)
+CREATE TABLE credentials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id),
+    credential_hash VARCHAR(255) NOT NULL, -- Argon2id
+    credential_type VARCHAR(50), -- password, ssh_key, api_key
+    username VARCHAR(255),
+    source_evidence_id UUID REFERENCES evidence(id),
+    source_description TEXT,
+    confidence VARCHAR(20), -- high, medium, low
+    discovered_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP
+);
+
+-- Credential usage tracking
+CREATE TABLE credential_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    credential_id UUID REFERENCES credentials(id),
+    host_id UUID REFERENCES hosts(id),
+    port_id UUID REFERENCES ports(id),
+    service_type VARCHAR(50),
+    test_result VARCHAR(20), -- success, failed, error
+    tested_at TIMESTAMP DEFAULT NOW(),
+    metadata JSONB
+);
+
+-- Relationships (pivot paths)
+CREATE TABLE relationships (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id),
+    source_host_id UUID REFERENCES hosts(id),
+    target_host_id UUID REFERENCES hosts(id),
+    relationship_type VARCHAR(50), -- credential_reuse, pivot, etc
+    credential_id UUID REFERENCES credentials(id),
+    discovered_at TIMESTAMP DEFAULT NOW(),
+    metadata JSONB
+);
+```
+
+#### B2. Redis Configuration for Ephemeral Credentials
+- [ ] Configure Redis with encryption at rest
+- [ ] Set up key naming convention: `cred:ephemeral:{uuid}`
+- [ ] Configure TTL enforcement (max 600 seconds)
+- [ ] Set up pub/sub for job queues
+
+#### B3. KMS/Secrets Integration
+- [ ] Set up HashiCorp Vault OR
+- [ ] Use AWS KMS OR
+- [ ] Configure local encryption key management
+- [ ] Create encryption/decryption workflows
+
+#### B4. Credential Discovery Workflow
+- [ ] Create workflow triggered by parser findings
+- [ ] Hash credential with Argon2id
+- [ ] Store hashed version in PG
+- [ ] Encrypt plaintext and store in Redis with TTL
+- [ ] Queue credential test job
+
+#### B5. Credential Tester Worker
+- [ ] Create isolated tester workflow/container
+- [ ] Pull from test queue
+- [ ] Decrypt ephemeral plaintext from Redis
+- [ ] Test against target service (SSH only for MVP)
+- [ ] Record result in credential_usage
+- [ ] DELETE plaintext immediately after test
+- [ ] On success: queue pivot analysis
+
+#### B6. ROE Enforcement
+- [ ] Add ROE checking before credential tests
+- [ ] Check time windows
+- [ ] Check target scope
+- [ ] Check rate limits
+- [ ] Queue for approval if outside ROE
+
+---
+
+### PHASE C: Enrichment & Additional Parsers
+**Estimated Effort: Intelligence layer**
+
+#### C1. Enrichment Workflows
+- [ ] CPE/CVE correlation (link services to known vulns)
+- [ ] Wappalyzer/tech detection
+- [ ] Reverse DNS lookups
+- [ ] ASN information
+- [ ] SSL certificate analysis
+
+#### C2. Additional Parsers
+- [ ] Amass JSON output
+- [ ] Nuclei JSON output
+- [ ] Subfinder output
+- [ ] Custom tool outputs
+
+#### C3. Findings & Vulnerabilities Table
+```sql
+CREATE TABLE findings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id),
+    host_id UUID REFERENCES hosts(id),
+    port_id UUID REFERENCES ports(id),
+    finding_type VARCHAR(50),
+    severity VARCHAR(20),
+    title VARCHAR(500),
+    description TEXT,
+    evidence_id UUID REFERENCES evidence(id),
+    cve_ids TEXT[],
+    remediation TEXT,
+    discovered_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### C4. Alerting System
+- [ ] Create notification workflow
+- [ ] Critical vuln alerts → Slack/Email
+- [ ] Successful pivot alerts
+- [ ] Daily digest option
+
+#### C5. RBAC Implementation
+- [ ] User management tables
+- [ ] Role definitions
+- [ ] Permission checks in workflows
+- [ ] API key system
+
+---
+
+### PHASE D: Maturity & Hardening
+**Estimated Effort: Production-ready layer**
+
+#### D1. Loot Management
+```sql
+CREATE TABLE loot (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id),
+    host_id UUID REFERENCES hosts(id),
+    loot_type VARCHAR(50), -- sam_dump, config, database, etc
+    minio_path VARCHAR(500),
+    file_hash VARCHAR(128),
+    extracted_secrets JSONB, -- references to credentials extracted
+    discovered_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### D2. Advanced Pivot Graph
+- [ ] Graph visualization of relationships
+- [ ] Path-finding queries
+- [ ] Attack tree generation
+
+#### D3. Approval Workflows
+- [ ] Manual review queue
+- [ ] Approval notifications
+- [ ] Escalation paths
+
+#### D4. Full Security Hardening
+- [ ] Network segmentation
+- [ ] Least-privilege DB accounts
+- [ ] Immutable audit logs
+- [ ] Penetration test the automation system itself
+
+#### D5. Monitoring & Observability
+- [ ] Prometheus metrics
+- [ ] Grafana dashboards
+- [ ] Scans/day, creds/day, pivots/day
+- [ ] Queue health
+- [ ] Error tracking
+
+================================================================================
+## 6. DECISIONS REQUIRED BEFORE IMPLEMENTATION
+================================================================================
+
+These must be decided before writing any workflows:
+
+### 6.1 Project Model
+- [ ] Single-tenant or multi-tenant?
+- [ ] If multi-tenant: how to handle user registration?
+- [ ] Project hierarchy (org → project → engagement)?
+
+### 6.2 Data Retention Policy
+Define how long to keep:
+- [ ] Raw evidence: _____ days (recommend: 365)
+- [ ] Parsed data: _____ years (recommend: 3)
+- [ ] Credentials: _____ days (recommend: 90 unless flagged)
+- [ ] Scan history: _____ days (recommend: 365)
+
+### 6.3 Secrets/Plaintext Policy
+- [ ] Which KMS/Vault to use?
+- [ ] Max TTL for ephemeral credentials? (recommend: 600 seconds)
+- [ ] Who can access KMS keys?
+
+### 6.4 Testing Windows
+- [ ] When are automated credential tests allowed?
+- [ ] Business hours only? 24/7?
+- [ ] Geographic/timezone considerations?
+
+### 6.5 RBAC Roles
+Minimum required:
+- [ ] Admin - full access
+- [ ] Analyst - run scans, view results
+- [ ] Reviewer - view only, approve requests
+
+Additional roles?
+- [ ] Operator?
+- [ ] API-only?
+
+### 6.6 Rate Limits
+- [ ] Global max concurrent scans: _____
+- [ ] Per-target cooldown: _____ minutes
+- [ ] Max credential tests/hour: _____
+
+================================================================================
+## 7. INTEGRATION WITH EXISTING WORKFLOW
+================================================================================
+
+### 7.1 Changes to pentest_router.json
+
+The current workflow will need these modifications:
+
+1. **Input Changes:**
+   - Add required `project_id` parameter
+   - Add optional `engagement_id` parameter
+
+2. **Before Execution:**
+   - Check project scope
+   - Verify target is in scope
+   - Check rate limits
+   - Log scan initiation
+
+3. **During Execution:**
+   - Save raw output to MinIO as execution happens
+   - Log each command execution to scan_history
+
+4. **After Execution:**
+   - Parse results and upsert to PG
+   - Queue enrichment jobs
+   - Queue credential discovery
+   - Generate and store report
+
+5. **Response Changes:**
+   - Return scan_id instead of full results
+   - Provide endpoint to retrieve results later
+
+### 7.2 New Webhook Endpoints Needed
+
+- POST /webhook/project - Create project
+- POST /webhook/ingest - Upload raw evidence
+- GET /webhook/scan/{id} - Get scan status/results
+- POST /webhook/approve/{job_id} - Approve pending action
+- GET /webhook/credentials/{project_id} - List discovered creds
+- GET /webhook/hosts/{project_id} - List discovered hosts
+
+================================================================================
+## 8. RISK ASSESSMENT
+================================================================================
+
+### High Risk Items:
+1. **Credential storage** - Must get encryption right first time
+2. **Plaintext handling** - Any leak is critical
+3. **ROE enforcement** - Must prevent out-of-scope testing
+
+### Medium Risk Items:
+1. **Data migration** - If existing data needs migration
+2. **Performance** - Queue backlogs with high volume
+3. **Storage costs** - MinIO can grow quickly
+
+### Mitigations:
+- Start with Phase A only, validate before moving on
+- Security review at end of Phase B before production creds
+- Load testing before production use
+
+================================================================================
+## 9. RECOMMENDED IMMEDIATE NEXT STEPS
+================================================================================
+
+1. **DECIDE:** Answer all questions in Section 6
+2. **INFRASTRUCTURE:** Add Redis + MinIO to docker-compose
+3. **SCHEMA:** Implement Phase A PostgreSQL tables
+4. **MODIFY:** Update pentest_router.json with project_id requirement
+5. **BUILD:** Create basic ingest workflow
+6. **TEST:** Validate data flow end-to-end
+7. **ITERATE:** Move to Phase B only after Phase A stable
+
+================================================================================
+## 10. GEMINI CLI ANALYSIS COMMANDS
+================================================================================
+
+Use these commands to analyze the codebase with Gemini:
+
+```bash
+# Analyze current workflow implementation
+gemini -p "@workflows/pentest_router.json Analyze this workflow and list all capabilities, tools used, and data flow"
+
+# Check database schema coverage
+gemini -p "@init-db.sql @migrations/ Compare existing schema with the requirements in @new_mod.txt and identify gaps"
+
+# Analyze docker setup for infrastructure readiness
+gemini -p "@docker-compose.yml @Dockerfile Analyze infrastructure and identify what needs to be added for Redis, MinIO, and Vault integration"
+
+# Review all workflows for consistency
+gemini -p "@workflows/ Analyze all workflows and identify common patterns, inconsistencies, and integration points"
+```
+
+================================================================================
+## APPENDIX: QUICK REFERENCE
+================================================================================
+
+### Current State: Simple Scan Tool
+- Input → AI Plan → Execute → AI Report → Output
+- No persistence, no security, no control
+
+### Target State: Enterprise Data Platform
+- Multi-tenant project management
+- Persistent evidence chain
+- Secure credential handling
+- Controlled automation with approvals
+- Full audit trail
+
+### Effort Breakdown:
+- Phase A (MVP): Foundation - must complete first
+- Phase B (Creds): Security-critical - careful implementation
+- Phase C (Enrichment): Intelligence value-add
+- Phase D (Maturity): Production hardening
+
+================================================================================
+END OF PLAN
+================================================================================

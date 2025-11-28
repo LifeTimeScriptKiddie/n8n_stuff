@@ -1,0 +1,247 @@
+# **5. BLUF (Bottom Line Up Front)**
+
+Your n8n pentest-automation platform must handle three things cleanly:
+
+1. **Data discipline** (scope, retention, secrets, evidence).
+2. **Credential security** (hash in DB, encrypted ephemeral plaintext in Redis, tester containers only).
+3. **Controlled automation** (ROE gates, rate limits, approval flows).
+
+Everything else—OSINT, uploads, chatter, scanning—is downstream of those three core responsibilities.
+
+This section now integrates across your entire architecture.
+
+---
+
+# **5.1 First Decisions To Make (Prioritized Policy & Scope)**
+
+These **must be decided before writing any workflows**.
+
+* [ ] **Project model**
+  multi-tenant → require `project_id` everywhere + RBAC.
+
+* [ ] **Data retention**
+  Define how long to keep:
+
+    Recommend defaults:
+  * Raw = 365 days
+  * Parsed = 3 years
+  * Credentials = 90 days unless flagged
+
+* [ ] **Secrets handling / plaintext policy**
+  Decide how plaintext credentials will be temporarily stored and tested.
+  Recommended:
+
+  * Never in PG.
+  * Only ephemeral encrypted blobs in Redis (TTL < 600 seconds).
+  * Only decrypted inside tester containers via KMS key.
+
+  * Need timestamps + checksums
+
+* [ ] **Active testing risk windows**
+  Define when automated credential reuse tests & intrusive scans are allowed.
+
+* [ ] **RBAC roles**
+  Required minimum: Admin / Analyst / Reviewer.
+
+---
+
+# **5.2 Conceptual Data Architecture (No SQL)**
+
+* **PostgreSQL (source of truth)**
+  JSONB for tool outputs, enrichments, and metadata.
+
+* **Redis (volatile layer)**
+
+  * Queues
+  * Ephemeral encrypted credentials
+  * Dedup markers
+  * Expired states (TTL)
+
+* **MinIO (object storage)**
+
+  * Raw XML / PCAP / screenshots
+  * Large output artifacts
+  * Checksum stored in PG
+
+* **Engagement Model**
+  Top-level: `Project → Host → Port → Service → Findings → Credentials → CredentialUsage → Relationships → ScanHistory → Loot`.
+
+* **Separation of Concerns**
+  Raw ↔ Parsed ↔ Ephemeral ↔ Notification.
+
+---
+
+# **5.3 Data-Handling Rules (How Data Must Flow)**
+
+1. **Ingest**
+   Raw file → MinIO → metadata → PG → queue parsing.
+
+2. **Parse & normalize**
+   Extract hosts/ports/services, creds, and loot.
+   Upsert via `(project_id, ip/hostname)` uniqueness.
+   Keep pointer to raw file.
+
+3. **Enrichment**
+   CPE/CVE, Wappalyzer tech tags, reverse DNS, ASN, SSL fingerprinting.
+
+4. **Credential discovery**
+   When found:
+
+   * Store **hashed** credential in PG.
+   * Store ephemeral encrypted plaintext in Redis.
+   * Queue credential tester job.
+   * Tester decrypts only at runtime and deletes immediately after.
+
+5. **Pivoting intelligence**
+   On successful login:
+
+   * Automatically propose reuse attempts 
+   * Update relationship graph edges.
+
+6. **Daily rollups**
+
+   * Snapshot ephemeral counters.
+   * Expire TTL’d data.
+   * Compress or archive old evidence.
+
+---
+
+# **5.4 Credential Handling (Mandatory Operational Rules)**
+
+* Store only hashed credentials in PG (Argon2id recommended).
+* Never store plaintext at rest.
+* Ephemeral plaintext in Redis (TTL < 600 seconds).
+* Only the credential-tester container may decrypt.
+* Log all access to KMS.
+* Record credential provenance & confidence.
+* Store success/fail per service.
+
+---
+
+# **5.5 Loot, Tokens & Artifacts (What To Separate)**
+
+* **Credentials** → hashed record + ephemeral plaintext.
+* **Loot files** → MinIO (SAM, DB dumps, configs).
+* **Tokens (API keys, JWTs, Kerberos tickets)** → treat as privileged creds w/ expiry.
+* **Derivatives** → secrets extracted from loot become their own credentials.
+
+---
+
+# **5.6 Critical Schema Behaviors & Queries To Support**
+
+Your architecture must be able to answer:
+
+* “Where did credential X work?”
+* “Show pivot path from host A → host B.”
+* “Which credentials were discovered in last 7 days?”
+* “What new high-severity vulnerabilities appeared today?”
+* “Link vulnerability → raw evidence → parser job → tester job.”
+
+---
+
+# **5.7 Required n8n Workflows (Conceptual)**
+
+* **Ingest workflow**
+  Save raw → PG → queue parse.
+
+* **Parse + Normalize workflow**
+  Extract structured objects → upsert → enrich → enqueue cred test.
+
+* **Credential Tester worker**
+  Decrypt ephemeral → test → update PG → delete plaintext.
+
+* **Pivot agent**
+  On success: propose reuse → enforce ROE → queue tests.
+
+* **Daily housekeeping**
+  TTL expirations, snapshot Redis counters, compress evidence.
+
+* **Notification workflow**
+  Critical vuln or pivot success → Slack/Email.
+
+* **Manual review / approvals**
+  For high-risk actions or sensitive loot.
+
+---
+
+# **5.8 Safety Rules**
+
+* Global & per-target rate limits.
+* Immutable raw evidence.
+* Vault/KMS for secrets.
+
+---
+
+# **5.9 Backups & Recovery**
+
+* PG nightly backup (30–90 day retention).
+* MinIO replication to secondary bucket.
+* Redis ephemeral—backup dedup markers only if necessary.
+* Quarterly restore tests.
+
+---
+
+# **5.10 Monitoring & Metrics**
+
+* Scans/day
+* New credentials/day
+* Successful pivots/day
+* Queue length
+* Errors / failed jobs
+* Health checks for n8n, DB, MinIO, Redis, tester containers
+
+---
+
+# **5.11 Security & Compliance Checklist**
+
+* Network segmentation
+* Least privilege DB accounts
+* Immutable audit logs
+* Pen test your own automation system
+
+---
+
+# **5.12 Prioritized Rollout Plan (Your Build Roadmap)**
+
+## **Phase A — MVP (Core)**
+
+* [ ] PG: Project + Host + Port + Service
+* [ ] MinIO bucket for raw files
+* [ ] Ingest + Parser for **Nmap XML**
+* [ ] Redis queue
+* [ ] Basic credential storage (hashed only)
+* [ ] Daily rollup
+
+## **Phase B — Automated Credential Testing**
+
+* [ ] Redis ephemeral encrypted plaintext
+* [ ] Credential-tester container + KMS
+* [ ] CredentialUsage table
+* [ ] Relationship graph edges
+* [ ] ROE for credential reuse
+* [ ] SSH test only (limit blast radius)
+
+## **Phase C — Enrichment & Additional Parsers**
+
+* [ ] Wappalyzer/tech detection
+* [ ] CPE/CVE correlations
+* [ ] Amass parser
+* [ ] Nuclei parser
+* [ ] Alerting + RBAC
+
+## **Phase D — Maturity**
+
+* [ ] Loot table + tokens
+* [ ] Advanced pivot graph
+* [ ] TimescaleDB (optional)
+* [ ] Full hardening (Vault, CI/CD, auditing, approvals)
+
+---
+
+# **5.13 Guardrails & Best Practices**
+
+* Automated tests must be reversible or non-destructive.
+* Start small: one parser + one credential type.
+* All workflows must be idempotent.
+* Document every workflow’s expected inputs & outputs.
+* Use human approval for risky actions.

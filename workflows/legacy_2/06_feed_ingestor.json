@@ -1,0 +1,80 @@
+{
+  "name": "Feed Ingestor (CVE & Exploit Intelligence)",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "0 3 * * *"}]}},
+      "name": "Daily at 3 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "schedule"
+    },
+    {
+      "parameters": {
+        "command": "searchsploit --update",
+        "options": {}
+      },
+      "name": "Update ExploitDB",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 200],
+      "id": "exploitdb"
+    },
+    {
+      "parameters": {
+        "command": "nuclei -update-templates",
+        "options": {}
+      },
+      "name": "Update Nuclei Templates",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 400],
+      "id": "nuclei"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0?lastModDays=1",
+        "options": {}
+      },
+      "name": "Fetch Recent CVEs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 600],
+      "id": "nvd"
+    },
+    {
+      "parameters": {
+        "functionCode": "const results = $input.all();\nreturn [{json: {sources_updated: results.length, timestamp: new Date().toISOString()}}];"
+      },
+      "name": "Aggregate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400],
+      "id": "aggregate"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO notifications (project_id, notification_type, severity, title, message) VALUES (NULL, 'system', 'info', 'Feed Update Complete', 'Updated {{ $json.sources_updated }} intelligence sources at {{ $json.timestamp }}');",
+        "options": {}
+      },
+      "name": "Log Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 400],
+      "id": "log",
+      "credentials": {"postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}}
+    }
+  ],
+  "connections": {
+    "Daily at 3 AM": {"main": [[{"node": "Update ExploitDB", "type": "main", "index": 0}, {"node": "Update Nuclei Templates", "type": "main", "index": 0}, {"node": "Fetch Recent CVEs", "type": "main", "index": 0}]]},
+    "Update ExploitDB": {"main": [[{"node": "Aggregate", "type": "main", "index": 0}]]},
+    "Update Nuclei Templates": {"main": [[{"node": "Aggregate", "type": "main", "index": 0}]]},
+    "Fetch Recent CVEs": {"main": [[{"node": "Aggregate", "type": "main", "index": 0}]]},
+    "Aggregate": {"main": [[{"node": "Log Update", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": [{"id": "1", "name": "intelligence"}],
+  "updatedAt": "2025-01-01T00:00:00.000Z"
+}

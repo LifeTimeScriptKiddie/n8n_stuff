@@ -1,0 +1,119 @@
+{
+  "name": "Tool Analyzer (Performance Analytics)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {"field": "cronExpression", "expression": "0 2 * * *"}
+          ]
+        }
+      },
+      "name": "Daily at 2 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "schedule"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get tool performance metrics\nSELECT * FROM v_top_performing_tools;",
+        "options": {}
+      },
+      "name": "Get Top Performing Tools",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 200],
+      "id": "top-tools",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Identify underperforming tools\nSELECT \n  tool_name,\n  tool_category,\n  target_type,\n  success_rate,\n  total_executions,\n  failed_executions,\n  findings_generated,\n  avg_execution_time_ms,\n  last_used\nFROM tool_success_metrics\nWHERE total_executions >= 5\n  AND success_rate < 50.0\nORDER BY success_rate ASC, total_executions DESC\nLIMIT 20;",
+        "options": {}
+      },
+      "name": "Get Underperforming Tools",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 400],
+      "id": "underperforming",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get tool category breakdown\nSELECT \n  tool_category,\n  COUNT(DISTINCT tool_name) as unique_tools,\n  SUM(total_executions) as total_runs,\n  ROUND(AVG(success_rate), 2) as avg_success_rate,\n  SUM(findings_generated) as total_findings\nFROM tool_success_metrics\nWHERE total_executions >= 3\nGROUP BY tool_category\nORDER BY total_findings DESC;",
+        "options": {}
+      },
+      "name": "Category Analysis",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 600],
+      "id": "categories",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate comprehensive analytics report\nconst topTools = $('Get Top Performing Tools').all();\nconst underperforming = $('Get Underperforming Tools').all();\nconst categories = $('Category Analysis').all();\n\nlet report = `# Tool Performance Analytics Report\\n`;\nreport += `Generated: ${new Date().toISOString()}\\n\\n`;\n\n// Top performers\nreport += `## 🏆 Top Performing Tools (Success Rate >= 80%)\\n\\n`;\nif (topTools.length > 0) {\n  report += `| Tool | Category | Target Type | Success Rate | Executions | Findings |\\n`;\n  report += `|------|----------|-------------|--------------|------------|----------|\\n`;\n  topTools.slice(0, 10).forEach(tool => {\n    const t = tool.json;\n    report += `| ${t.tool_name} | ${t.tool_category || 'N/A'} | ${t.target_type} | ${t.success_rate}% | ${t.total_executions} | ${t.findings_generated} |\\n`;\n  });\n} else {\n  report += `No tools with sufficient data yet.\\n`;\n}\n\nreport += `\\n`;\n\n// Underperformers\nreport += `## ⚠️ Tools Needing Attention (Success Rate < 50%)\\n\\n`;\nif (underperforming.length > 0) {\n  report += `| Tool | Category | Success Rate | Failures | Executions |\\n`;\n  report += `|------|----------|--------------|----------|------------|\\n`;\n  underperforming.slice(0, 10).forEach(tool => {\n    const t = tool.json;\n    report += `| ${t.tool_name} | ${t.tool_category || 'N/A'} | ${t.success_rate}% | ${t.failed_executions} | ${t.total_executions} |\\n`;\n  });\n} else {\n  report += `All tools performing adequately!\\n`;\n}\n\nreport += `\\n`;\n\n// Category breakdown\nreport += `## 📊 Tool Category Performance\\n\\n`;\nif (categories.length > 0) {\n  report += `| Category | Unique Tools | Total Runs | Avg Success | Findings |\\n`;\n  report += `|----------|--------------|------------|-------------|----------|\\n`;\n  categories.forEach(cat => {\n    const c = cat.json;\n    report += `| ${c.tool_category} | ${c.unique_tools} | ${c.total_runs} | ${c.avg_success_rate}% | ${c.total_findings} |\\n`;\n  });\n}\n\nreport += `\\n`;\n\n// Recommendations\nreport += `## 💡 Recommendations\\n\\n`;\nif (underperforming.length > 0) {\n  report += `1. **Review Failing Tools**: ${underperforming.length} tools have <50% success rate\\n`;\n  report += `2. **Top Failing Tool**: ${underperforming[0].json.tool_name} (${underperforming[0].json.success_rate}% success)\\n`;\n}\nif (topTools.length > 0) {\n  report += `3. **Most Effective**: ${topTools[0].json.tool_name} (${topTools[0].json.success_rate}% success, ${topTools[0].json.findings_generated} findings)\\n`;\n}\n\nreturn [{\n  json: {\n    report_markdown: report,\n    report_date: new Date().toISOString(),\n    top_tools_count: topTools.length,\n    underperforming_count: underperforming.length,\n    categories_analyzed: categories.length\n  }\n}];"
+      },
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400],
+      "id": "generate-report"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO notifications (project_id, notification_type, severity, title, message, metadata)\nVALUES (\n  NULL,\n  'system',\n  'info',\n  'Tool Performance Analytics',\n  $1,\n  jsonb_build_object(\n    'report_date', $2,\n    'top_tools', $3,\n    'underperforming', $4\n  )\n)\nRETURNING id;",
+        "options": {
+          "queryParameters": "={{ JSON.stringify([$json.report_markdown.substring(0, 1000), $json.report_date, $json.top_tools_count, $json.underperforming_count]) }}"
+        }
+      },
+      "name": "Store Report Notification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 400],
+      "id": "store-notification",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Daily at 2 AM": {
+      "main": [[
+        {"node": "Get Top Performing Tools", "type": "main", "index": 0},
+        {"node": "Get Underperforming Tools", "type": "main", "index": 0},
+        {"node": "Category Analysis", "type": "main", "index": 0}
+      ]]
+    },
+    "Get Top Performing Tools": {
+      "main": [[{"node": "Generate Report", "type": "main", "index": 0}]]
+    },
+    "Get Underperforming Tools": {
+      "main": [[{"node": "Generate Report", "type": "main", "index": 0}]]
+    },
+    "Category Analysis": {
+      "main": [[{"node": "Generate Report", "type": "main", "index": 0}]]
+    },
+    "Generate Report": {
+      "main": [[{"node": "Store Report Notification", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "tags": [{"id": "1", "name": "analytics"}],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

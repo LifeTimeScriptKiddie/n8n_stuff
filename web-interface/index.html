@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>n8n Recon Hub - Target Submission</title>
+    <title>n8n Recon Hub - Simple Interface</title>
     <style>
         * {
             margin: 0;
@@ -12,555 +12,525 @@
         }
 
         body {
-            font-family: 'Courier New', monospace;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
-            color: #00ff41;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             padding: 20px;
         }
 
         .container {
-            background: rgba(22, 22, 44, 0.9);
-            border: 2px solid #00ff41;
-            border-radius: 10px;
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
-            box-shadow: 0 0 30px rgba(0, 255, 65, 0.3);
-            animation: glow 2s ease-in-out infinite alternate;
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
         }
 
-        @keyframes glow {
-            from {
-                box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
-            }
-            to {
-                box-shadow: 0 0 40px rgba(0, 255, 65, 0.5);
-            }
-        }
-
-        h1 {
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
             text-align: center;
-            margin-bottom: 10px;
-            font-size: 28px;
-            text-shadow: 0 0 10px #00ff41;
         }
 
-        .subtitle {
-            text-align: center;
-            color: #888;
-            margin-bottom: 30px;
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            opacity: 0.9;
             font-size: 14px;
         }
 
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+
         .form-group {
-            margin-bottom: 25px;
+            margin-bottom: 20px;
         }
 
         label {
             display: block;
             margin-bottom: 8px;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        input[type="text"] {
-            width: 100%;
-            padding: 15px;
-            background: #0d0d1e;
-            border: 2px solid #00ff41;
-            border-radius: 5px;
-            color: #00ff41;
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-            transition: all 0.3s ease;
-        }
-
-        input[type="text"]:focus {
-            outline: none;
-            border-color: #00ffff;
-            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
-        }
-
-        input[type="text"]::placeholder {
             color: #555;
+            font-weight: 600;
+            font-size: 14px;
         }
 
-        select {
+        input[type="text"],
+        textarea {
             width: 100%;
-            padding: 15px;
-            background: #0d0d1e;
-            border: 2px solid #00ff41;
-            border-radius: 5px;
-            color: #00ff41;
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-            cursor: pointer;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
         }
 
-        select:focus {
+        input[type="text"]:focus,
+        textarea:focus {
             outline: none;
-            border-color: #00ffff;
-            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
-        }
-
-        select option {
-            background: #0d0d1e;
-            color: #00ff41;
+            border-color: #667eea;
         }
 
         textarea {
-            width: 100%;
-            padding: 15px;
-            background: #0d0d1e;
-            border: 2px solid #00ff41;
-            border-radius: 5px;
-            color: #00ff41;
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
             resize: vertical;
             min-height: 80px;
         }
 
-        textarea:focus {
-            outline: none;
-            border-color: #00ffff;
-            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
-        }
-
-        textarea::placeholder {
-            color: #555;
-        }
-
-        .examples {
-            margin-bottom: 20px;
-        }
-
-        .examples-label {
-            display: block;
-            margin-bottom: 10px;
-            font-size: 12px;
-            color: #888;
-            text-transform: uppercase;
-        }
-
-        .example-btn {
-            background: rgba(0, 255, 65, 0.1);
-            border: 1px solid #00ff41;
-            color: #00ff41;
-            padding: 6px 12px;
-            border-radius: 15px;
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            cursor: pointer;
-            margin: 3px;
-            transition: all 0.2s ease;
-        }
-
-        .example-btn:hover {
-            background: rgba(0, 255, 65, 0.3);
-            transform: scale(1.05);
-        }
-
         .btn {
-            width: 100%;
-            padding: 15px;
-            background: linear-gradient(135deg, #00ff41 0%, #00cc33 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
             border: none;
-            border-radius: 5px;
-            color: #000;
-            font-family: 'Courier New', monospace;
-            font-size: 18px;
-            font-weight: bold;
-            text-transform: uppercase;
+            padding: 14px 28px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
-            letter-spacing: 2px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
         }
 
         .btn:hover {
-            background: linear-gradient(135deg, #00ffff 0%, #00cccc 100%);
             transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(0, 255, 65, 0.5);
-        }
-
-        .btn:active {
-            transform: translateY(0);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
         }
 
         .btn:disabled {
-            background: #333;
-            color: #666;
+            background: #ccc;
             cursor: not-allowed;
             transform: none;
         }
 
-        .message {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 5px;
-            text-align: center;
-            font-size: 14px;
-            display: none;
-            animation: fadeIn 0.3s ease;
+        .btn-secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+            margin-top: 10px;
         }
 
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .btn-secondary:hover {
+            background: #f0f0f0;
+        }
+
+        .message {
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 15px;
+            display: none;
         }
 
         .message.success {
-            background: rgba(0, 255, 65, 0.2);
-            border: 2px solid #00ff41;
-            color: #00ff41;
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
         }
 
         .message.error {
-            background: rgba(255, 0, 65, 0.2);
-            border: 2px solid #ff0041;
-            color: #ff0041;
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
 
-        .info {
-            margin-top: 30px;
-            padding: 15px;
-            background: rgba(0, 255, 255, 0.1);
-            border-left: 4px solid #00ffff;
-            border-radius: 5px;
+        .message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .help-text {
             font-size: 12px;
-            color: #00ffff;
+            color: #888;
+            margin-top: 5px;
         }
 
-        .info-title {
-            font-weight: bold;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .info ul {
-            list-style: none;
-            padding-left: 0;
-        }
-
-        .info li {
-            padding: 5px 0;
-            padding-left: 20px;
-            position: relative;
-        }
-
-        .info li:before {
-            content: "▸";
-            position: absolute;
-            left: 0;
-            color: #00ffff;
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(0, 255, 65, 0.3);
-            border-radius: 50%;
-            border-top-color: #00ff41;
-            animation: spin 1s ease-in-out infinite;
-            margin-right: 10px;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .report-section {
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
             margin-top: 20px;
-            border: 2px solid #00ffff;
-            border-radius: 5px;
-            background: rgba(0, 255, 255, 0.05);
         }
 
-        .report-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 15px;
-            background: rgba(0, 255, 255, 0.1);
-            border-bottom: 1px solid #00ffff;
-            font-weight: bold;
-            color: #00ffff;
-        }
-
-        .copy-btn {
-            background: #00ffff;
-            color: #000;
-            border: none;
-            padding: 5px 10px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-        }
-
-        .copy-btn:hover {
-            background: #00ff41;
-        }
-
-        .report-content {
+        .quick-btn {
             padding: 15px;
-            max-height: 400px;
-            overflow-y: auto;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .quick-btn:hover {
+            border-color: #667eea;
+            background: #f8f9fa;
+        }
+
+        .quick-btn .icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .quick-btn .label {
             font-size: 13px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            color: #ccc;
+            color: #666;
         }
 
-        .report-content h1, .report-content h2, .report-content h3 {
-            color: #00ff41;
-            margin: 15px 0 10px 0;
+        .project-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            background: white;
         }
 
-        .report-content ul {
-            margin-left: 20px;
+        .project-item {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: background 0.2s;
         }
 
-        .report-content li {
-            margin: 5px 0;
+        .project-item:hover {
+            background: #f0f0f0;
+        }
+
+        .project-item:last-child {
+            border-bottom: none;
+        }
+
+        .project-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .project-id {
+            font-size: 11px;
+            color: #888;
+            font-family: monospace;
         }
 
         @media (max-width: 600px) {
             .container {
-                padding: 25px;
+                border-radius: 0;
             }
-
-            h1 {
-                font-size: 22px;
-            }
-
-            .btn {
-                font-size: 16px;
+            .content {
+                padding: 20px;
             }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎯 n8n Recon Hub</h1>
-        <p class="subtitle">Submit targets for automated reconnaissance</p>
-
-        <form id="scanForm">
-            <div class="form-group">
-                <label for="target">What would you like to scan?</label>
-                <textarea
-                    id="target"
-                    name="target"
-                    placeholder="Try: 'Thoroughly scan example.com for vulnerabilities' or 'Quick port scan on 192.168.1.0/24'"
-                    required
-                    autocomplete="off"
-                    rows="3"
-                ></textarea>
-            </div>
-
-            <div class="examples">
-                <span class="examples-label">Examples:</span>
-                <button type="button" class="example-btn" onclick="setExample('Scan example.com')">Basic scan</button>
-                <button type="button" class="example-btn" onclick="setExample('Thoroughly scan example.com and find all vulnerabilities')">Thorough</button>
-                <button type="button" class="example-btn" onclick="setExample('Quick port scan on 192.168.1.1')">Port scan</button>
-                <button type="button" class="example-btn" onclick="setExample('Stealthy recon on 10.0.0.0/24')">Stealth CIDR</button>
-                <button type="button" class="example-btn" onclick="setExample('Find subdomains and check for vulnerabilities on target.com')">Subdomain enum</button>
-            </div>
-
-            <button type="submit" class="btn" id="submitBtn">
-                🚀 Start Scan
-            </button>
-        </form>
-
-        <div id="message" class="message"></div>
-
-        <div id="reportSection" class="report-section" style="display: none;">
-            <div class="report-header">
-                <span>📋 Security Report</span>
-                <button id="copyBtn" class="copy-btn" onclick="copyReport()">📋 Copy</button>
-            </div>
-            <div id="reportContent" class="report-content"></div>
+        <div class="header">
+            <h1>🎯 n8n Recon Hub</h1>
+            <p>Simple Pentesting Interface</p>
         </div>
 
-        <div class="info">
-            <div class="info-title">ℹ️ Supported Targets:</div>
-            <ul>
-                <li>Domains: example.com</li>
-                <li>IPs: 192.168.1.1</li>
-                <li>CIDR: 192.168.1.0/24</li>
-                <li>Wildcards: *.example.com</li>
-                <li>Multiple: target1.com, target2.com</li>
-            </ul>
+        <div class="content">
+            <!-- Step 1: Create or Select Project -->
+            <div class="section">
+                <h2>📁 Step 1: Project Setup</h2>
+
+                <div class="form-group">
+                    <label>Project ID (optional - leave empty to create new)</label>
+                    <input type="text" id="projectId" placeholder="UUID of existing project">
+                    <div class="help-text">If empty, you'll create a new project below</div>
+                </div>
+
+                <div class="form-group">
+                    <label>New Project Name</label>
+                    <input type="text" id="projectName" placeholder="e.g., Client Pentest 2024">
+                </div>
+
+                <div class="form-group">
+                    <label>Project Scope</label>
+                    <textarea id="projectScope" placeholder="Enter targets (one per line):&#10;example.com&#10;192.168.1.0/24&#10;10.0.0.1"></textarea>
+                    <div class="help-text">Enter domains, IPs, or CIDR ranges (one per line or comma-separated)</div>
+                </div>
+
+                <button class="btn" onclick="createProject()">Create New Project</button>
+                <button class="btn-secondary" onclick="generateSQL()">Generate SQL Command</button>
+
+                <div id="projectMessage" class="message"></div>
+            </div>
+
+            <!-- Step 2: Start Scan -->
+            <div class="section">
+                <h2>🚀 Step 2: Start Scan</h2>
+
+                <div class="form-group">
+                    <label>Target</label>
+                    <input type="text" id="target" placeholder="example.com or 192.168.1.0/24">
+                    <div class="help-text">Domain, IP address, or CIDR range to scan</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Scan Mode</label>
+                    <select id="mode" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px;">
+                        <option value="quick">Quick (1-2 commands)</option>
+                        <option value="standard" selected>Standard (3-5 commands)</option>
+                        <option value="thorough">Thorough (6+ commands)</option>
+                    </select>
+                </div>
+
+                <button class="btn" onclick="startScan()">Start Scan</button>
+                <button class="btn-secondary" onclick="generateScanSQL()">Generate Scan SQL</button>
+
+                <div id="scanMessage" class="message"></div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="section">
+                <h2>⚡ Quick Actions</h2>
+                <div class="quick-actions">
+                    <div class="quick-btn" onclick="listProjects()">
+                        <div class="icon">📋</div>
+                        <div class="label">List Projects</div>
+                    </div>
+                    <div class="quick-btn" onclick="showSQL()">
+                        <div class="icon">💾</div>
+                        <div class="label">Direct SQL</div>
+                    </div>
+                    <div class="quick-btn" onclick="window.location.href='/webhook-history'">
+                        <div class="icon">📊</div>
+                        <div class="label">View History</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
-        // Configuration - Using nginx proxy for agentic pentest workflow
-        const N8N_WEBHOOK_URL = '/webhook/pentest';
+        function showMessage(elementId, text, type) {
+            const msg = document.getElementById(elementId);
+            msg.textContent = text;
+            msg.className = `message ${type}`;
+            msg.style.display = 'block';
 
-        // Alternative configurations (comment/uncomment as needed):
-        // const N8N_WEBHOOK_URL = '/webhook/demo-recon';  // Simple demo workflow
-        // const N8N_WEBHOOK_URL = '/webhook/recon-scan';  // Full workflow with PostgreSQL
-
-        // Form elements
-        const form = document.getElementById('scanForm');
-        const targetInput = document.getElementById('target');
-        const submitBtn = document.getElementById('submitBtn');
-        const messageDiv = document.getElementById('message');
-        const reportSection = document.getElementById('reportSection');
-        const reportContent = document.getElementById('reportContent');
-        let currentReport = '';
-
-        // Set example text
-        function setExample(text) {
-            targetInput.value = text;
-            targetInput.focus();
-        }
-
-        // Extract mode from natural language
-        function extractMode(text) {
-            const lower = text.toLowerCase();
-            if (lower.includes('quick') || lower.includes('fast')) return 'quick';
-            if (lower.includes('thorough') || lower.includes('comprehensive') || lower.includes('full') || lower.includes('deep')) return 'thorough';
-            if (lower.includes('stealth') || lower.includes('quiet') || lower.includes('evasive') || lower.includes('slow')) return 'stealth';
-            return 'standard';
-        }
-
-        // Check if input contains a valid target pattern
-        function containsTarget(text) {
-            // Look for IP, domain, CIDR patterns in the text
-            const patterns = [
-                /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/,  // IP
-                /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}/,  // CIDR
-                /[a-zA-Z0-9-]+\.[a-zA-Z]{2,}/,  // Domain
-                /https?:\/\//,  // URL
-                /s3:\/\//,  // S3 bucket
-            ];
-            return patterns.some(p => p.test(text));
-        }
-
-        // Show message
-        function showMessage(text, type) {
-            messageDiv.textContent = text;
-            messageDiv.className = `message ${type}`;
-            messageDiv.style.display = 'block';
-
-            // Auto-hide after 5 seconds for success messages
             if (type === 'success') {
-                setTimeout(() => {
-                    messageDiv.style.display = 'none';
-                }, 5000);
+                setTimeout(() => msg.style.display = 'none', 5000);
             }
         }
 
-        // Handle form submission
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
+        function generateSQL() {
+            const name = document.getElementById('projectName').value.trim();
+            const scopeRaw = document.getElementById('projectScope').value.trim();
 
-            const input = targetInput.value.trim();
-
-            // Validate input
-            if (!input) {
-                showMessage('❌ Please describe what you want to scan', 'error');
+            if (!name) {
+                showMessage('projectMessage', 'Please enter a project name first', 'error');
                 return;
             }
 
-            if (!containsTarget(input)) {
-                showMessage('❌ Please include a target (domain, IP, or URL) in your request', 'error');
+            if (!scopeRaw) {
+                showMessage('projectMessage', 'Please enter at least one target in scope', 'error');
                 return;
             }
 
-            // Disable form during submission
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="spinner"></span> Scanning...';
+            // Parse scope - accept both newlines and commas
+            const scopeArray = scopeRaw
+                .split(/[\n,]+/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            if (scopeArray.length === 0) {
+                showMessage('projectMessage', 'Please enter valid targets', 'error');
+                return;
+            }
+
+            // Generate JSON array for SQL with proper escaping
+            const jsonScope = JSON.stringify(scopeArray).replace(/"/g, '\\"'); // Escape double quotes for shell
+            const escapedName = name.replace(/'/g, "''"); // Escape single quotes for SQL
+
+            const sqlCommand = `docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "
+INSERT INTO projects (name, scope, created_at, updated_at)
+VALUES ('${escapedName}', '${jsonScope}'::json, NOW(), NOW())
+RETURNING id, name, scope;"`;
+
+            // Copy to clipboard
+            navigator.clipboard.writeText(sqlCommand).then(() => {
+                showMessage('projectMessage',
+                    '✅ SQL command copied to clipboard!\n\nPaste it in your terminal, then copy the UUID that gets returned and paste it in the "Project ID" field above.',
+                    'success'
+                );
+            }).catch(() => {
+                // Fallback: show in alert
+                alert('Copy this command and run it in your terminal:\n\n' + sqlCommand);
+            });
+        }
+
+        async function createProject() {
+            const name = document.getElementById('projectName').value.trim();
+            const scopeRaw = document.getElementById('projectScope').value.trim();
+
+            if (!name) {
+                showMessage('projectMessage', 'Please enter a project name', 'error');
+                return;
+            }
+
+            if (!scopeRaw) {
+                showMessage('projectMessage', 'Please enter at least one target in scope', 'error');
+                return;
+            }
+
+            // Parse scope - accept both newlines and commas
+            const scopeArray = scopeRaw
+                .split(/[\n,]+/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            if (scopeArray.length === 0) {
+                showMessage('projectMessage', 'Please enter valid targets', 'error');
+                return;
+            }
+
+            showMessage('projectMessage', 'Creating project...', 'info');
 
             try {
-                // Extract mode from natural language
-                const mode = extractMode(input);
-
-                // Send to n8n webhook - pass natural language as target
-                const response = await fetch(N8N_WEBHOOK_URL, {
+                const response = await fetch('/webhook/project/create', {
                     method: 'POST',
-                    mode: 'cors',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        target: input,
-                        mode: mode,
-                        natural_language: true,
-                        timestamp: new Date().toISOString(),
-                        source: 'web-interface'
+                        name: name,
+                        scope: scopeArray
                     })
                 });
 
-                if (response.ok) {
-                    const result = await response.json();
+                const result = await response.json();
 
-                    if (result.report) {
-                        // Display the report
-                        currentReport = result.report;
-                        reportContent.textContent = result.report.replace(/\\n/g, '\n');
-                        reportSection.style.display = 'block';
-                        let msg = `✅ Scan complete! ${result.commands_executed} commands executed.`;
-                        if (result.scan_mode) msg += ` Mode: ${result.scan_mode}`;
-                        if (result.notes) msg += ` Notes: ${result.notes}`;
-                        showMessage(msg, 'success');
-                    } else {
-                        showMessage(`✅ Target submitted successfully! Scan initiated for: ${target}`, 'success');
-                    }
+                if (response.ok && result.id) {
+                    document.getElementById('projectId').value = result.id;
+                    showMessage('projectMessage', `✅ Project created! ID: ${result.id}`, 'success');
 
                     // Clear form
-                    targetInput.value = '';
+                    document.getElementById('projectName').value = '';
+                    document.getElementById('projectScope').value = '';
                 } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(result.error || result.message || 'Failed to create project');
                 }
-
             } catch (error) {
-                console.error('Submission error:', error);
-                showMessage(`❌ Error: ${error.message}. Check if n8n is running and webhook is configured.`, 'error');
-            } finally {
-                // Re-enable form
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '🚀 Start Scan';
+                showMessage('projectMessage',
+                    `❌ ${error.message}\n\n💡 TIP: Click "Generate SQL Command" button instead to create the project via database.`,
+                    'error'
+                );
+                console.error('Project creation error:', error);
             }
-        });
+        }
 
-        // Focus on input on load
-        window.addEventListener('load', () => {
-            targetInput.focus();
-        });
+        function generateScanSQL() {
+            const projectId = document.getElementById('projectId').value.trim();
+            const target = document.getElementById('target').value.trim();
+            const mode = document.getElementById('mode').value;
 
-        // Allow Enter key in input to submit
-        targetInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                form.dispatchEvent(new Event('submit'));
+            if (!projectId) {
+                showMessage('scanMessage', 'Please enter a Project ID first', 'error');
+                return;
             }
-        });
 
-        // Copy report to clipboard
-        function copyReport() {
-            navigator.clipboard.writeText(currentReport.replace(/\\n/g, '\n')).then(() => {
-                document.getElementById('copyBtn').textContent = '✅ Copied!';
-                setTimeout(() => {
-                    document.getElementById('copyBtn').textContent = '📋 Copy';
-                }, 2000);
+            if (!target) {
+                showMessage('scanMessage', 'Please enter a target', 'error');
+                return;
+            }
+
+            const sqlCommand = `docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "INSERT INTO scan_jobs (project_id, target, job_type, scan_mode, status, queued_at, created_at) VALUES ('${projectId}', '${target}', 'network-scan', '${mode}', 'queued', NOW(), NOW()) RETURNING id, target, status;"`;
+
+            // Copy to clipboard
+            navigator.clipboard.writeText(sqlCommand).then(() => {
+                showMessage('scanMessage',
+                    '✅ SQL command copied to clipboard!\n\nPaste it in your terminal to start the scan. The scan will be queued and processed by n8n.',
+                    'success'
+                );
+            }).catch(() => {
+                alert('Copy this command and run it in your terminal:\n\n' + sqlCommand);
             });
+        }
+
+        async function startScan() {
+            const projectId = document.getElementById('projectId').value.trim();
+            const target = document.getElementById('target').value.trim();
+            const mode = document.getElementById('mode').value;
+
+            if (!target) {
+                showMessage('scanMessage', 'Please enter a target', 'error');
+                return;
+            }
+
+            if (!projectId) {
+                showMessage('scanMessage', 'Please create a project first or enter a project ID', 'error');
+                return;
+            }
+
+            showMessage('scanMessage', 'Starting scan...', 'info');
+
+            try {
+                const response = await fetch('/webhook/pentest/v2', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: projectId,
+                        target: target,
+                        mode: mode,
+                        timestamp: new Date().toISOString(),
+                        source: 'simple-web-ui'
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('scanMessage', `✅ Scan started! Job ID: ${result.scan_job_id || 'N/A'}`, 'success');
+                } else {
+                    throw new Error(result.error || result.message || 'Scan failed');
+                }
+            } catch (error) {
+                showMessage('scanMessage',
+                    `❌ ${error.message}\n\n💡 TIP: Click "Generate Scan SQL" button instead to queue the scan via database.`,
+                    'error'
+                );
+                console.error('Scan error:', error);
+            }
+        }
+
+        function listProjects() {
+            const sql = 'SELECT id, name, created_at FROM projects ORDER BY created_at DESC LIMIT 20;';
+            showMessage('projectMessage',
+                `Run this in terminal:\n\ndocker exec -i recon_postgres psql -U recon_user -d recon_hub -c "${sql}"`,
+                'info'
+            );
+        }
+
+        function showSQL() {
+            const examples = `
+📌 Useful SQL Commands:
+
+List all projects:
+docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "SELECT id, name FROM projects;"
+
+Create project directly:
+docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "INSERT INTO projects (name, scope) VALUES ('Test', '{\"example.com\"}') RETURNING id;"
+
+View scan jobs:
+docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "SELECT id, target, status FROM scan_jobs ORDER BY created_at DESC LIMIT 10;"
+            `;
+            alert(examples);
         }
     </script>
 </body>
 </html>
-<!-- Cache buster: <?php echo time(); ?> 1763462877 -->

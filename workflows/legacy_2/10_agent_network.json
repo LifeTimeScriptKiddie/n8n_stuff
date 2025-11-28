@@ -1,0 +1,74 @@
+{
+  "name": "Agent: Network",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "agent/network", "responseMode": "lastNode"},
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "agent-network",
+      "id": "webhook"
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body || $input.first().json;\nreturn [{json: {target: body.target, project_id: body.project_id, scan_mode: body.scan_mode || 'standard', session_id: body.session_id}}];"
+      },
+      "name": "Parse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "id": "parse"
+    },
+    {
+      "parameters": {
+        "command": "=nmap -sV -sC --script vuln {{ $json.target }} -oX /tmp/nmap_vuln_{{ $json.session_id }}.xml",
+        "options": {"timeout": 900000}
+      },
+      "name": "Nmap Vuln Scan",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 200],
+      "id": "nmap-vuln"
+    },
+    {
+      "parameters": {
+        "command": "=nxc smb {{ $json.target }} --gen-relay-list /tmp/relay_{{ $json.session_id }}.txt",
+        "options": {"timeout": 300000}
+      },
+      "name": "NetExec SMB",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "id": "nxc"
+    },
+    {
+      "parameters": {
+        "functionCode": "const results = $input.all();\nreturn [{json: {agent_name: 'network', success: true, findings_count: results.length, results: results.map(r => r.json)}}];"
+      },
+      "name": "Aggregate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "id": "aggregate"
+    },
+    {
+      "parameters": {"respondWith": "json", "responseBody": "={{ JSON.stringify($json) }}"},
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 300],
+      "id": "response"
+    }
+  ],
+  "connections": {
+    "Webhook": {"main": [[{"node": "Parse", "type": "main", "index": 0}]]},
+    "Parse": {"main": [[{"node": "Nmap Vuln Scan", "type": "main", "index": 0}, {"node": "NetExec SMB", "type": "main", "index": 0}]]},
+    "Nmap Vuln Scan": {"main": [[{"node": "Aggregate", "type": "main", "index": 0}]]},
+    "NetExec SMB": {"main": [[{"node": "Aggregate", "type": "main", "index": 0}]]},
+    "Aggregate": {"main": [[{"node": "Response", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": [{"id": "1", "name": "agent"}],
+  "updatedAt": "2025-01-01T00:00:00.000Z"
+}

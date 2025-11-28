@@ -1,0 +1,216 @@
+{
+  "name": "Learning Extractor (Pattern Discovery)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12
+            }
+          ]
+        }
+      },
+      "name": "Schedule Every 12 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "schedule-trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Find completed scans with findings from last 24 hours\nSELECT \n  sj.id as scan_job_id,\n  sj.project_id,\n  sj.target,\n  sj.job_type,\n  sj.scan_mode,\n  sj.results,\n  sj.report,\n  sj.completed_at,\n  0 as execution_time_ms,\n  COALESCE((sj.results->'findings_count')::int, 0) as findings_generated\nFROM scan_jobs sj\nWHERE sj.status = 'completed'\n  AND sj.completed_at > NOW() - INTERVAL '24 hours'\n  AND sj.results IS NOT NULL\nORDER BY findings_generated DESC, sj.completed_at DESC\nLIMIT 100;",
+        "options": {}
+      },
+      "name": "Get Recent Completed Scans",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "id": "get-scans",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract attack patterns from successful scans\nconst patterns = [];\n\nfor (const item of $input.all()) {\n  const scan = item.json;\n  const results = scan.results || {};\n  \n  // Only process scans that found something\n  if (scan.findings_generated === 0) {\n    continue;\n  }\n  \n  // Extract tool chain\n  const commands = results.commands || [];\n  if (commands.length === 0) {\n    continue;\n  }\n  \n  const toolChain = commands.map(c => c.command);\n  const toolNames = commands.map(c => c.command.split(' ')[0]);\n  \n  // Calculate success metrics\n  const successfulCommands = commands.filter(c => c.exit_code === 0);\n  const successRate = (successfulCommands.length / commands.length * 100).toFixed(2);\n  \n  // Identify target type\n  let targetType = 'network';\n  if (scan.target.match(/^https?:\\/\\//)) {\n    targetType = 'web';\n  } else if (scan.job_type === 'cloud-scan') {\n    targetType = 'cloud';\n  } else if (results.api_endpoints || toolChain.some(t => t.includes('ffuf') || t.includes('graphql'))) {\n    targetType = 'api';\n  }\n  \n  // Build conditions that triggered this pattern\n  const conditions = {\n    target_pattern: scan.target.includes(':') ? 'with_port' : 'domain_or_ip',\n    scan_mode: scan.scan_mode,\n    job_type: scan.job_type\n  };\n  \n  // Add service detection if available\n  if (results.services && Array.isArray(results.services)) {\n    conditions.services_detected = results.services.map(s => s.name || s.service);\n  }\n  \n  // Extract finding types\n  const findingTypes = [];\n  if (results.findings && Array.isArray(results.findings)) {\n    findingTypes.push(...results.findings.map(f => f.type || f.title || 'unknown'));\n  }\n  \n  // Generate pattern name\n  const patternName = `${targetType}_${toolNames.slice(0, 3).join('_')}_pattern`;\n  \n  // Calculate pattern hash for deduplication\n  const crypto = require('crypto');\n  const patternHash = crypto\n    .createHash('sha256')\n    .update(JSON.stringify(toolChain) + targetType)\n    .digest('hex')\n    .substring(0, 16);\n  \n  patterns.push({\n    json: {\n      pattern_name: patternName,\n      pattern_hash: patternHash,\n      pattern_type: scan.findings_generated > 0 ? 'exploitation' : 'reconnaissance',\n      conditions: conditions,\n      target_type: targetType,\n      tool_chain: toolChain,\n      tool_names: toolNames,\n      estimated_duration_minutes: Math.ceil(scan.execution_time_ms / 60000),\n      success_rate: parseFloat(successRate),\n      findings_generated: scan.findings_generated,\n      expected_finding_types: [...new Set(findingTypes)], // unique values\n      risk_level: scan.findings_generated > 5 ? 'high' : scan.findings_generated > 2 ? 'medium' : 'low',\n      learned_from_scan_id: scan.scan_job_id,\n      project_id: scan.project_id,\n      scan_target: scan.target,\n      scan_completed_at: scan.completed_at\n    }\n  });\n}\n\nreturn patterns;"
+      },
+      "name": "Extract Attack Patterns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "id": "extract-patterns"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Check If Patterns Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "id": "check-patterns"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Upsert attack pattern\nINSERT INTO attack_patterns (\n  pattern_name,\n  pattern_hash,\n  pattern_type,\n  conditions,\n  target_type,\n  tool_chain,\n  estimated_duration_minutes,\n  success_count,\n  total_attempts,\n  risk_level,\n  expected_finding_types,\n  avg_findings_per_success,\n  learned_from_scan_id,\n  created_by,\n  confidence_score\n) VALUES (\n  '{{ $json.pattern_name }}',\n  '{{ $json.pattern_hash }}',\n  '{{ $json.pattern_type }}',\n  '{{ JSON.stringify($json.conditions) }}',\n  '{{ $json.target_type }}',\n  ARRAY[{{ $json.tool_chain.map(t => \"'\" + t.replace(/'/g, \"''\") + \"'\").join(',') }}],\n  {{ $json.estimated_duration_minutes }},\n  1,\n  1,\n  '{{ $json.risk_level }}',\n  ARRAY[{{ $json.expected_finding_types.map(f => \"'\" + f.replace(/'/g, \"''\") + \"'\").join(',') }}],\n  {{ $json.findings_generated }},\n  '{{ $json.learned_from_scan_id }}',\n  'learning_extractor',\n  0.7\n)\nON CONFLICT (pattern_hash)\nDO UPDATE SET\n  success_count = attack_patterns.success_count + 1,\n  total_attempts = attack_patterns.total_attempts + 1,\n  avg_findings_per_success = (\n    (attack_patterns.avg_findings_per_success * attack_patterns.success_count + {{ $json.findings_generated }}) \n    / (attack_patterns.success_count + 1)\n  ),\n  last_successful_use = CURRENT_TIMESTAMP,\n  confidence_score = LEAST(1.0, attack_patterns.confidence_score + 0.05),\n  updated_at = CURRENT_TIMESTAMP\nRETURNING id, pattern_name, success_count, total_attempts, avg_success_rate;",
+        "options": {}
+      },
+      "name": "Store Attack Pattern",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1120, 200],
+      "id": "store-pattern",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Analyze tool effectiveness from recent scans\nSELECT \n  jsonb_array_elements(results->'commands') as cmd_data,\n  project_id,\n  target,\n  job_type,\n  0 as execution_time_ms,\n  COALESCE((results->'findings_count')::int, 0) as findings_count\nFROM scan_jobs sj\nWHERE status = 'completed'\n  AND completed_at > NOW() - INTERVAL '24 hours'\n  AND results->'commands' IS NOT NULL\nLIMIT 500;",
+        "options": {}
+      },
+      "name": "Get Tool Executions",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [680, 500],
+      "id": "get-tool-executions",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process individual tool executions for metrics\nconst toolMetrics = [];\n\nfor (const item of $input.all()) {\n  const cmdData = item.json.cmd_data;\n  const projectId = item.json.project_id;\n  const target = item.json.target;\n  const jobType = item.json.job_type;\n  const findingsCount = item.json.findings_count || 0;\n  const scanDuration = item.json.execution_time_ms || 0;\n  \n  if (!cmdData || !cmdData.command) {\n    continue;\n  }\n  \n  const command = cmdData.command;\n  const toolName = command.split(' ')[0];\n  const exitCode = cmdData.exit_code;\n  const executionTime = cmdData.execution_time_ms || 0;\n  const success = exitCode === 0;\n  \n  // Determine target type\n  let targetType = 'network';\n  if (target.match(/^https?:\\/\\//)) {\n    targetType = 'web';\n  } else if (jobType === 'cloud-scan') {\n    targetType = 'cloud';\n  }\n  \n  // Extract service info from command\n  let serviceName = null;\n  let serviceVersion = null;\n  let port = null;\n  \n  // Parse common patterns\n  const portMatch = command.match(/-p\\s+(\\d+)/);\n  if (portMatch) {\n    port = parseInt(portMatch[1]);\n  }\n  \n  // Determine tool category\n  const scanners = ['nmap', 'naabu', 'masscan'];\n  const fuzzers = ['ffuf', 'wfuzz', 'gobuster'];\n  const exploiters = ['sqlmap', 'nuclei', 'metasploit'];\n  const reconTools = ['subfinder', 'amass', 'httpx', 'katana'];\n  \n  let toolCategory = 'other';\n  if (scanners.includes(toolName)) toolCategory = 'scanner';\n  else if (fuzzers.includes(toolName)) toolCategory = 'fuzzer';\n  else if (exploiters.includes(toolName)) toolCategory = 'exploit';\n  else if (reconTools.includes(toolName)) toolCategory = 'recon';\n  \n  toolMetrics.push({\n    json: {\n      project_id: projectId,\n      tool_name: toolName,\n      tool_category: toolCategory,\n      target_type: targetType,\n      service_name: serviceName,\n      service_version: serviceVersion,\n      port: port,\n      success: success,\n      execution_time_ms: executionTime,\n      findings_generated: success ? Math.ceil(findingsCount / 5) : 0, // Rough attribution\n      command: command\n    }\n  });\n}\n\nreturn toolMetrics;"
+      },
+      "name": "Process Tool Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 500],
+      "id": "process-tool-metrics"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Update tool success metrics\nSELECT update_tool_metrics(\n  '{{ $json.project_id }}',\n  '{{ $json.tool_name }}',\n  '{{ $json.target_type }}',\n  {{ $json.service_name ? \"'\" + $json.service_name + \"'\" : \"NULL\" }},\n  {{ $json.service_version ? \"'\" + $json.service_version + \"'\" : \"NULL\" }},\n  {{ $json.port || \"NULL\" }},\n  {{ $json.success }},\n  {{ $json.execution_time_ms }},\n  {{ $json.findings_generated }},\n  '{{ $json.tool_category }}'\n);",
+        "options": {}
+      },
+      "name": "Update Tool Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1120, 500],
+      "id": "update-metrics",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get learning summary statistics\nSELECT \n  (SELECT COUNT(*) FROM attack_patterns WHERE created_at > NOW() - INTERVAL '24 hours') as new_patterns_24h,\n  (SELECT COUNT(*) FROM attack_patterns WHERE updated_at > NOW() - INTERVAL '24 hours') as updated_patterns_24h,\n  (SELECT AVG(avg_success_rate) FROM attack_patterns WHERE total_attempts >= 3) as avg_pattern_success_rate,\n  (SELECT COUNT(DISTINCT tool_name) FROM tool_success_metrics WHERE last_used > NOW() - INTERVAL '24 hours') as active_tools_24h,\n  (SELECT AVG(success_rate) FROM tool_success_metrics WHERE total_executions >= 5) as avg_tool_success_rate,\n  (SELECT COUNT(*) FROM knowledge_vectors WHERE created_at > NOW() - INTERVAL '24 hours') as new_knowledge_vectors_24h;",
+        "options": {}
+      },
+      "name": "Generate Learning Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1340, 300],
+      "id": "learning-summary",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO notifications (project_id, notification_type, severity, title, message, metadata)\nVALUES (\n  NULL,\n  'system',\n  'info',\n  'Learning Extractor Completed',\n  'New Patterns: {{ $json.new_patterns_24h }}\\nUpdated Patterns: {{ $json.updated_patterns_24h }}\\nAvg Pattern Success: {{ $json.avg_pattern_success_rate }}%\\nActive Tools: {{ $json.active_tools_24h }}\\nAvg Tool Success: {{ $json.avg_tool_success_rate }}%\\nNew Knowledge: {{ $json.new_knowledge_vectors_24h }}',\n  '{\"extractor_run\": \"{{ $now }}\"}'::jsonb\n);",
+        "options": {}
+      },
+      "name": "Create Notification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1560, 300],
+      "id": "create-notification",
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - Recon Hub"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Schedule Every 12 Hours": {
+      "main": [[
+        {"node": "Get Recent Completed Scans", "type": "main", "index": 0},
+        {"node": "Get Tool Executions", "type": "main", "index": 0}
+      ]]
+    },
+    "Get Recent Completed Scans": {
+      "main": [[{"node": "Extract Attack Patterns", "type": "main", "index": 0}]]
+    },
+    "Extract Attack Patterns": {
+      "main": [[{"node": "Check If Patterns Found", "type": "main", "index": 0}]]
+    },
+    "Check If Patterns Found": {
+      "main": [[
+        {"node": "Store Attack Pattern", "type": "main", "index": 0}
+      ]]
+    },
+    "Store Attack Pattern": {
+      "main": [[{"node": "Generate Learning Summary", "type": "main", "index": 0}]]
+    },
+    "Get Tool Executions": {
+      "main": [[{"node": "Process Tool Metrics", "type": "main", "index": 0}]]
+    },
+    "Process Tool Metrics": {
+      "main": [[{"node": "Update Tool Metrics", "type": "main", "index": 0}]]
+    },
+    "Update Tool Metrics": {
+      "main": [[{"node": "Generate Learning Summary", "type": "main", "index": 0}]]
+    },
+    "Generate Learning Summary": {
+      "main": [[{"node": "Create Notification", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "id": "1",
+      "name": "learning"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

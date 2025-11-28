@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Learning Statistics - n8n Recon Hub</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { color: #58a6ff; margin-bottom: 30px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 20px; }
+        .card h2 { color: #58a6ff; font-size: 1.2em; margin-bottom: 15px; }
+        .metric { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #21262d; }
+        .metric:last-child { border-bottom: none; }
+        .metric-label { color: #8b949e; }
+        .metric-value { color: #3fb950; font-weight: bold; }
+        .progress-bar { background: #21262d; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 5px; }
+        .progress-fill { background: linear-gradient(90deg, #1f6feb, #58a6ff); height: 100%; transition: width 0.3s; }
+        .table { width: 100%; border-collapse: collapse; }
+        .table th { text-align: left; padding: 12px; background: #0d1117; color: #8b949e; font-weight: 600; }
+        .table td { padding: 12px; border-bottom: 1px solid #21262d; }
+        .badge { padding: 4px 8px; border-radius: 12px; font-size: 0.85em; }
+        .badge-high { background: #238636; color: white; }
+        .badge-medium { background: #9e6a03; color: white; }
+        .badge-low { background: #6e7681; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Learning & Intelligence Statistics</h1>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Knowledge Base</h2>
+                <div class="metric">
+                    <span class="metric-label">Total Vectors</span>
+                    <span class="metric-value" id="total-vectors">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Relevance</span>
+                    <span class="metric-value" id="avg-relevance">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total Citations</span>
+                    <span class="metric-value" id="total-citations">-</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Attack Patterns</h2>
+                <div class="metric">
+                    <span class="metric-label">Total Patterns</span>
+                    <span class="metric-value" id="total-patterns">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Success Rate</span>
+                    <span class="metric-value" id="pattern-success">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">High Confidence</span>
+                    <span class="metric-value" id="high-confidence">-</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Tool Performance</h2>
+                <div class="metric">
+                    <span class="metric-label">Active Tools</span>
+                    <span class="metric-value" id="active-tools">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Success Rate</span>
+                    <span class="metric-value" id="tool-success">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total Findings</span>
+                    <span class="metric-value" id="total-findings">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Top Performing Tools</h2>
+            <table class="table" id="tools-table">
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Category</th>
+                        <th>Success Rate</th>
+                        <th>Executions</th>
+                        <th>Findings</th>
+                    </tr>
+                </thead>
+                <tbody id="tools-body">
+                    <tr><td colspan="5" style="text-align: center; color: #6e7681;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+            <h2>Successful Attack Patterns</h2>
+            <table class="table" id="patterns-table">
+                <thead>
+                    <tr>
+                        <th>Pattern</th>
+                        <th>Type</th>
+                        <th>Success Rate</th>
+                        <th>Attempts</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody id="patterns-body">
+                    <tr><td colspan="5" style="text-align: center; color: #6e7681;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function loadStats() {
+            try {
+                const response = await fetch('http://localhost:5678/webhook/api/learning-stats');
+                const data = await response.json();
+
+                // Knowledge Base
+                document.getElementById('total-vectors').textContent = data.knowledge.total_vectors || 0;
+                document.getElementById('avg-relevance').textContent = (data.knowledge.avg_relevance * 100).toFixed(1) + '%';
+                document.getElementById('total-citations').textContent = data.knowledge.total_citations || 0;
+
+                // Attack Patterns
+                document.getElementById('total-patterns').textContent = data.patterns.total || 0;
+                document.getElementById('pattern-success').textContent = data.patterns.avg_success_rate?.toFixed(1) + '%';
+                document.getElementById('high-confidence').textContent = data.patterns.high_confidence || 0;
+
+                // Tools
+                document.getElementById('active-tools').textContent = data.tools.active_count || 0;
+                document.getElementById('tool-success').textContent = data.tools.avg_success_rate?.toFixed(1) + '%';
+                document.getElementById('total-findings').textContent = data.tools.total_findings || 0;
+
+                // Top Tools Table
+                if (data.top_tools) {
+                    document.getElementById('tools-body').innerHTML = data.top_tools.slice(0, 10).map(tool => `
+                        <tr>
+                            <td><strong>${tool.tool_name}</strong></td>
+                            <td>${tool.tool_category || 'N/A'}</td>
+                            <td>
+                                <span class="badge badge-${tool.success_rate >= 80 ? 'high' : tool.success_rate >= 50 ? 'medium' : 'low'}">
+                                    ${tool.success_rate}%
+                                </span>
+                            </td>
+                            <td>${tool.total_executions}</td>
+                            <td>${tool.findings_generated}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                // Patterns Table
+                if (data.top_patterns) {
+                    document.getElementById('patterns-body').innerHTML = data.top_patterns.slice(0, 10).map(pattern => `
+                        <tr>
+                            <td><strong>${pattern.pattern_name}</strong></td>
+                            <td>${pattern.pattern_type}</td>
+                            <td>
+                                <span class="badge badge-${pattern.avg_success_rate >= 80 ? 'high' : pattern.avg_success_rate >= 50 ? 'medium' : 'low'}">
+                                    ${pattern.avg_success_rate}%
+                                </span>
+                            </td>
+                            <td>${pattern.total_attempts}</td>
+                            <td>${(pattern.confidence_score * 100).toFixed(0)}%</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        loadStats();
+        setInterval(loadStats, 60000); // Refresh every minute
+    </script>
+</body>
+</html>

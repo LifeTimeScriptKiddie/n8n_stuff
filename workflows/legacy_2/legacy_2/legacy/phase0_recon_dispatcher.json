@@ -1,0 +1,245 @@
+{
+  "name": "Recon Dispatcher",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recon-scan",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Recon Scan",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [240, 300],
+      "webhookId": "recon-scan"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "target",
+              "name": "target",
+              "value": "={{ $json.body.target }}",
+              "type": "string"
+            },
+            {
+              "id": "session_id",
+              "name": "session_id",
+              "value": "={{ $json.body.session_id || $now.format('yyyyMMdd-HHmmss') + '-' + $json.body.target.replace(/[^a-zA-Z0-9]/g, '-') }}",
+              "type": "string"
+            },
+            {
+              "id": "source",
+              "name": "source",
+              "value": "={{ $json.body.source || 'web-interface' }}",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "debug",
+              "name": "debug",
+              "value": "={{ $json.body.debug || false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "phases",
+              "name": "phases",
+              "value": "={{ $json.body.phases || [1,2,3,4] }}",
+              "type": "string"
+            },
+            {
+              "id": "skip_db",
+              "name": "skip_db",
+              "value": "={{ $json.body.skip_db || false }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-params",
+      "name": "Extract Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO recon_sessions (session_name, session_id, target_scope, target, status, scope_file, notes)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.session_id }}',\n  '{{ $json.target }}',\n  '{{ $json.target }}',\n  'initiated',\n  'default',\n  'Created by Recon Dispatcher from {{ $json.source }}'\n)\nON CONFLICT (session_id) DO UPDATE SET\n  status = 'initiated',\n  updated_at = NOW()\nRETURNING *;",
+        "options": {}
+      },
+      "id": "create-session",
+      "name": "Create Session in DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "Creates the session record in PostgreSQL for Phase 1 to use",
+      "credentials": {
+        "postgres": {
+          "id": "HL1CHIzRMH4iXzQn",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"message\": \"Reconnaissance scan initiated\", \"target\": $json.target, \"session_id\": $json.session_id, \"timestamp\": $json.timestamp, \"debug\": $json.debug, \"phases\": $json.phases, \"skip_db\": $json.skip_db, \"source\": $json.source, \"webhook_endpoints\": { \"phase1\": \"http://n8n-recon:5678/webhook/phase1-passive-recon\", \"phase2\": \"http://n8n-recon:5678/webhook/phase2-active-recon\", \"phase3\": \"http://n8n-recon:5678/webhook/phase3-vuln-assessment\", \"phase4\": \"http://n8n-recon:5678/webhook/phase4-analysis-reporting\" } } }}"
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond: Scan Started",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase1-passive-recon",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $json.target, \"session_id\": $json.session_id, \"source\": $json.source } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase1",
+      "name": "Trigger Phase 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "notes": "Starts Phase 1: Passive Reconnaissance",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase2-active-recon",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $json.target, \"session_id\": $json.session_id, \"source\": $json.source } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase2",
+      "name": "Trigger Phase 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 400],
+      "notes": "Starts Phase 2: Active Reconnaissance",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase3-vuln-assessment",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $json.target, \"session_id\": $json.session_id, \"source\": $json.source } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase3",
+      "name": "Trigger Phase 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 500],
+      "notes": "Starts Phase 3: Vulnerability Assessment",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase4-analysis-reporting",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"target\": $json.target, \"session_id\": $json.session_id, \"source\": $json.source } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase4",
+      "name": "Trigger Phase 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 600],
+      "notes": "Starts Phase 4: Analysis & Reporting",
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Webhook: Recon Scan": {
+      "main": [
+        [
+          {
+            "node": "Extract Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Parameters": {
+      "main": [
+        [
+          {
+            "node": "Create Session in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Session in DB": {
+      "main": [
+        [
+          {
+            "node": "Respond: Scan Started",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Phase 1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Phase 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Phase 3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Phase 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-17T18:10:00.000Z",
+  "versionId": "2"
+}

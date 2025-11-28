@@ -1,0 +1,222 @@
+{
+  "name": "Daily Housekeeping",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily at 2 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Expire old credentials (90 days default)\nUPDATE secure_credentials\nSET status = 'expired'\nWHERE status != 'expired'\nAND discovered_at < NOW() - INTERVAL '90 days'\nAND expires_at IS NULL;\n\n-- Count expired\nSELECT COUNT(*) as expired_credentials\nFROM secure_credentials\nWHERE status = 'expired'\nAND discovered_at > NOW() - INTERVAL '1 day'",
+        "options": {}
+      },
+      "name": "Expire Old Credentials",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Clean up old rate limits (older than 1 day)\nDELETE FROM rate_limits\nWHERE cooldown_until < NOW() - INTERVAL '1 day';\n\n-- Clean up completed test queue entries (older than 7 days)\nDELETE FROM credential_test_queue\nWHERE status IN ('completed', 'failed')\nAND completed_at < NOW() - INTERVAL '7 days';\n\n-- Expire old approvals\nUPDATE approval_queue\nSET status = 'expired'\nWHERE status = 'pending'\nAND expires_at < NOW();\n\nSELECT 'cleanup' as task, 'completed' as status",
+        "options": {}
+      },
+      "name": "Cleanup Old Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [640, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Generate daily metrics snapshot\nWITH metrics AS (\n  SELECT\n    (SELECT COUNT(*) FROM scan_jobs WHERE created_at > NOW() - INTERVAL '1 day') as scans_today,\n    (SELECT COUNT(*) FROM secure_credentials WHERE discovered_at > NOW() - INTERVAL '1 day') as creds_today,\n    (SELECT COUNT(*) FROM credential_usage WHERE test_result = 'success' AND tested_at > NOW() - INTERVAL '1 day') as successful_auths_today,\n    (SELECT COUNT(*) FROM findings WHERE discovered_at > NOW() - INTERVAL '1 day') as findings_today,\n    (SELECT COUNT(*) FROM findings WHERE severity IN ('critical', 'high') AND discovered_at > NOW() - INTERVAL '1 day') as critical_findings_today,\n    (SELECT COUNT(*) FROM hosts WHERE created_at > NOW() - INTERVAL '1 day') as new_hosts_today,\n    (SELECT COUNT(*) FROM evidence WHERE uploaded_at > NOW() - INTERVAL '1 day') as evidence_uploaded_today\n)\nSELECT * FROM metrics",
+        "options": {}
+      },
+      "name": "Generate Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [860, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mark old evidence for archival (365 days)\nUPDATE evidence\nSET metadata = metadata || '{\"archive_candidate\": true}'::jsonb\nWHERE uploaded_at < NOW() - INTERVAL '365 days'\nAND (metadata->>'archive_candidate')::boolean IS NOT TRUE;\n\n-- Count archive candidates\nSELECT COUNT(*) as archive_candidates\nFROM evidence\nWHERE (metadata->>'archive_candidate')::boolean = TRUE",
+        "options": {}
+      },
+      "name": "Mark Archives",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1080, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Clear stale running jobs (stuck for more than 1 hour)\nUPDATE scan_jobs\nSET status = 'failed',\n    error_message = 'Job timed out after 1 hour',\n    completed_at = NOW()\nWHERE status = 'running'\nAND started_at < NOW() - INTERVAL '1 hour';\n\n-- Clear stale processing credential tests\nUPDATE credential_test_queue\nSET status = 'failed',\n    error_message = 'Test timed out',\n    completed_at = NOW()\nWHERE status = 'processing'\nAND started_at < NOW() - INTERVAL '10 minutes';\n\nSELECT 'stale_cleanup' as task, 'completed' as status",
+        "options": {}
+      },
+      "name": "Clear Stale Jobs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1300, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile housekeeping report\nconst expired = $('Expire Old Credentials').first().json;\nconst metrics = $('Generate Metrics').first().json;\nconst archives = $('Mark Archives').first().json;\n\nconst report = {\n  date: new Date().toISOString().split('T')[0],\n  metrics: {\n    scans_today: metrics.scans_today || 0,\n    credentials_discovered: metrics.creds_today || 0,\n    successful_authentications: metrics.successful_auths_today || 0,\n    findings_discovered: metrics.findings_today || 0,\n    critical_findings: metrics.critical_findings_today || 0,\n    new_hosts: metrics.new_hosts_today || 0,\n    evidence_uploaded: metrics.evidence_uploaded_today || 0\n  },\n  housekeeping: {\n    credentials_expired: expired.expired_credentials || 0,\n    evidence_archive_candidates: archives.archive_candidates || 0\n  },\n  status: 'completed'\n};\n\nreturn [{ json: report }];"
+      },
+      "name": "Compile Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Log housekeeping run\nINSERT INTO audit_log (\n  action,\n  entity_type,\n  details\n) VALUES (\n  'daily_housekeeping',\n  'system',\n  '{{ JSON.stringify($json) }}'::jsonb\n)",
+        "options": {}
+      },
+      "name": "Log Housekeeping",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1740, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily at 2 AM": {
+      "main": [
+        [
+          {
+            "node": "Expire Old Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expire Old Credentials": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Old Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Old Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Metrics": {
+      "main": [
+        [
+          {
+            "node": "Mark Archives",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Archives": {
+      "main": [
+        [
+          {
+            "node": "Clear Stale Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Stale Jobs": {
+      "main": [
+        [
+          {
+            "node": "Compile Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Report": {
+      "main": [
+        [
+          {
+            "node": "Log Housekeeping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

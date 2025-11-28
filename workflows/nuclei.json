@@ -1,0 +1,142 @@
+{
+  "name": "Nuclei - Vulnerability Scanner",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "nuclei",
+        "options": {
+          "responseData": "Nuclei scan started!"
+        },
+        "httpMethod": "POST"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-640, -240],
+      "webhookId": "nuclei-webhook"
+    },
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-640, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $json.target || $json.body.target || 'https://example.com' }}"
+            },
+            {
+              "id": "2",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.format('yyyyMMdd_HHmmss') }}"
+            },
+            {
+              "id": "3",
+              "name": "severity",
+              "type": "string",
+              "value": "={{ $json.severity || $json.body.severity || 'critical,high,medium' }}"
+            },
+            {
+              "id": "4",
+              "name": "tags",
+              "type": "string",
+              "value": "={{ $json.tags || $json.body.tags || '' }}"
+            }
+          ]
+        }
+      },
+      "id": "set-params",
+      "name": "1. Set Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [-320, -120]
+    },
+    {
+      "parameters": {
+        "command": "=# Prepare target input\necho \"{{ $json.target }}\" > /tmp/nuclei_input_{{ $json.timestamp }}.txt\n\n# Run nuclei scan with JSON output\nnuclei -l /tmp/nuclei_input_{{ $json.timestamp }}.txt -severity {{ $json.severity }} {{ $json.tags ? '-tags ' + $json.tags : '' }} -json -silent -stats -o /tmp/nuclei_output_{{ $json.timestamp }}.json\n\n# Display results\necho \"=== NUCLEI SCAN COMPLETE ===\"\nif [ -f /tmp/nuclei_output_{{ $json.timestamp }}.json ]; then\n  cat /tmp/nuclei_output_{{ $json.timestamp }}.json\nelse\n  echo '[]'\nfi\n\n# Cleanup input\nrm -f /tmp/nuclei_input_{{ $json.timestamp }}.txt"
+      },
+      "id": "run-nuclei",
+      "name": "2. Execute Nuclei",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [0, -120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Nuclei JSON output\nconst raw = $input.first().json;\nconst output = raw.stdout || '';\nconst params = $('1. Set Parameters').first().json;\n\n// Extract JSON results (skip the stats line)\nconst lines = output.split('\\n').filter(line => {\n  const trimmed = line.trim();\n  return trimmed && !trimmed.startsWith('===') && trimmed !== '[]';\n});\n\nconst findings = [];\nconst uniqueFindings = new Set();\n\nconsole.log(`=== PARSING NUCLEI OUTPUT ===`);\nconsole.log(`Raw lines: ${lines.length}`);\n\nfor (const line of lines) {\n  try {\n    const data = JSON.parse(line);\n    \n    // Create unique key to avoid duplicates\n    const key = `${data.info?.name}_${data.host}_${data.matched_at}`;\n    \n    if (!uniqueFindings.has(key)) {\n      uniqueFindings.add(key);\n      \n      const finding = {\n        template_id: data['template-id'] || data.templateID || 'unknown',\n        name: data.info?.name || 'Unknown',\n        severity: data.info?.severity || 'info',\n        description: data.info?.description || '',\n        tags: data.info?.tags || [],\n        reference: data.info?.reference || [],\n        host: data.host || '',\n        matched_at: data.matched_at || data['matched-at'] || '',\n        extracted_results: data.extracted_results || [],\n        matcher_name: data.matcher_name || data['matcher-name'] || '',\n        type: data.type || '',\n        timestamp: new Date().toISOString()\n      };\n      \n      findings.push(finding);\n      console.log(`  [${finding.severity.toUpperCase()}] ${finding.name} - ${finding.host}`);\n    }\n  } catch (e) {\n    console.log(`  ✗ Failed to parse line: ${line.substring(0, 50)}...`);\n  }\n}\n\nconsole.log(`✓ Parsed ${findings.length} unique findings`);\n\n// Calculate statistics by severity\nconst stats = {\n  total: findings.length,\n  critical: findings.filter(f => f.severity === 'critical').length,\n  high: findings.filter(f => f.severity === 'high').length,\n  medium: findings.filter(f => f.severity === 'medium').length,\n  low: findings.filter(f => f.severity === 'low').length,\n  info: findings.filter(f => f.severity === 'info').length,\n  unique_templates: [...new Set(findings.map(f => f.template_id))].length\n};\n\nconst outputData = {\n  scan_target: params.target,\n  scan_timestamp: params.timestamp,\n  scan_severity_filter: params.severity,\n  statistics: stats,\n  findings: findings\n};\n\nconst buffer = Buffer.from(JSON.stringify(outputData, null, 2), 'utf-8');\n\nreturn [{\n  json: outputData,\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'application/json',\n      fileName: 'nuclei_results.json'\n    }\n  }\n}];"
+      },
+      "id": "parse-output",
+      "name": "3. Parse Nuclei Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, -120]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/tmp/nuclei_parsed_{{ $('1. Set Parameters').first().json.timestamp }}.json",
+        "dataPropertyName": "data"
+      },
+      "id": "save-results",
+      "name": "4. Save Results",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [640, -120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate HTML Report for Nuclei Results\nconst data = $input.first().json;\nconst stats = data.statistics;\n\nfunction severityColor(severity) {\n  const colors = {\n    'critical': '#c62828',\n    'high': '#f57c00',\n    'medium': '#fbc02d',\n    'low': '#388e3c',\n    'info': '#1976d2'\n  };\n  return colors[severity.toLowerCase()] || '#757575';\n}\n\nconst html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Nuclei Vulnerability Report</title>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body {\n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;\n      line-height: 1.6;\n      color: #333;\n      background-color: #f5f5f5;\n    }\n    .container {\n      max-width: 1400px;\n      margin: 0 auto;\n      padding: 20px;\n      background-color: white;\n    }\n    .header {\n      background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);\n      color: white;\n      padding: 40px 30px;\n      margin: -20px -20px 30px -20px;\n    }\n    h1 { font-size: 28px; margin-bottom: 10px; }\n    .meta { background-color: #f9f9f9; padding: 15px; margin-bottom: 20px; border-left: 4px solid #e91e63; }\n    .stats {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));\n      gap: 15px;\n      margin: 20px 0;\n    }\n    .stat-card {\n      padding: 20px;\n      border-radius: 8px;\n      text-align: center;\n      color: white;\n    }\n    .stat-card.critical { background: linear-gradient(135deg, #c62828 0%, #d32f2f 100%); }\n    .stat-card.high { background: linear-gradient(135deg, #f57c00 0%, #ff9800 100%); }\n    .stat-card.medium { background: linear-gradient(135deg, #fbc02d 0%, #fdd835 100%); }\n    .stat-card.low { background: linear-gradient(135deg, #388e3c 0%, #4caf50 100%); }\n    .stat-card.info { background: linear-gradient(135deg, #1976d2 0%, #2196f3 100%); }\n    .stat-card.total { background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%); }\n    .stat-card .value { font-size: 32px; font-weight: bold; }\n    .stat-card .label { font-size: 12px; margin-top: 8px; opacity: 0.9; }\n    .finding-card {\n      margin: 15px 0;\n      padding: 20px;\n      background-color: #fafafa;\n      border-radius: 8px;\n      border-left: 4px solid #e91e63;\n    }\n    .finding-header {\n      display: flex;\n      gap: 15px;\n      align-items: center;\n      margin-bottom: 10px;\n    }\n    .finding-name {\n      font-size: 18px;\n      font-weight: bold;\n      color: #333;\n      flex: 1;\n    }\n    .severity-badge {\n      display: inline-block;\n      padding: 6px 12px;\n      border-radius: 4px;\n      color: white;\n      font-size: 12px;\n      font-weight: 600;\n      text-transform: uppercase;\n    }\n    .finding-meta {\n      font-size: 13px;\n      color: #666;\n      margin: 8px 0;\n    }\n    .finding-description {\n      margin: 12px 0;\n      line-height: 1.7;\n      color: #555;\n    }\n    .tag {\n      display: inline-block;\n      background-color: #e1bee7;\n      color: #6a1b9a;\n      padding: 3px 8px;\n      margin: 2px;\n      border-radius: 3px;\n      font-size: 11px;\n    }\n    .matched-url {\n      font-family: monospace;\n      background-color: #fff3e0;\n      padding: 8px;\n      border-radius: 4px;\n      margin: 8px 0;\n      word-break: break-all;\n      font-size: 13px;\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>Nuclei Vulnerability Scanner Report</h1>\n      <div>Target: ${data.scan_target}</div>\n    </div>\n\n    <div class=\"meta\">\n      <div><strong>Scan Date:</strong> ${new Date().toISOString().split('T')[0]}</div>\n      <div><strong>Scan Time:</strong> ${new Date().toISOString().split('T')[1].split('.')[0]}</div>\n      <div><strong>Severity Filter:</strong> ${data.scan_severity_filter}</div>\n    </div>\n\n    <h2>Statistics</h2>\n    <div class=\"stats\">\n      <div class=\"stat-card total\">\n        <div class=\"value\">${stats.total}</div>\n        <div class=\"label\">Total Findings</div>\n      </div>\n      <div class=\"stat-card critical\">\n        <div class=\"value\">${stats.critical}</div>\n        <div class=\"label\">Critical</div>\n      </div>\n      <div class=\"stat-card high\">\n        <div class=\"value\">${stats.high}</div>\n        <div class=\"label\">High</div>\n      </div>\n      <div class=\"stat-card medium\">\n        <div class=\"value\">${stats.medium}</div>\n        <div class=\"label\">Medium</div>\n      </div>\n      <div class=\"stat-card low\">\n        <div class=\"value\">${stats.low}</div>\n        <div class=\"label\">Low</div>\n      </div>\n      <div class=\"stat-card info\">\n        <div class=\"value\">${stats.info}</div>\n        <div class=\"label\">Info</div>\n      </div>\n    </div>\n\n    <h2>Findings</h2>\n${data.findings.map(f => `    <div class=\"finding-card\" style=\"border-left-color: ${severityColor(f.severity)}\">\n      <div class=\"finding-header\">\n        <div class=\"finding-name\">${f.name}</div>\n        <span class=\"severity-badge\" style=\"background-color: ${severityColor(f.severity)}\">${f.severity}</span>\n      </div>\n      <div class=\"finding-meta\">\n        <strong>Template ID:</strong> ${f.template_id}<br>\n        <strong>Type:</strong> ${f.type || 'N/A'}<br>\n        <strong>Host:</strong> ${f.host}\n      </div>\n      ${f.matched_at ? `<div class=\"matched-url\"><strong>Matched At:</strong> ${f.matched_at}</div>` : ''}\n      ${f.description ? `<div class=\"finding-description\">${f.description}</div>` : ''}\n      ${f.tags.length > 0 ? `<div>${f.tags.map(t => `<span class=\"tag\">${t}</span>`).join('')}</div>` : ''}\n    </div>`).join('\\n')}\n  </div>\n</body>\n</html>`;\n\nconst buffer = Buffer.from(html, 'utf-8');\n\nreturn [{\n  json: { html: html },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'text/html',\n      fileName: 'nuclei_report.html'\n    }\n  }\n}];"
+      },
+      "id": "generate-report",
+      "name": "5. Generate HTML Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, -120]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/tmp/nuclei_report_{{ $('1. Set Parameters').first().json.timestamp }}.html",
+        "dataPropertyName": "data"
+      },
+      "id": "save-report",
+      "name": "6. Save HTML Report",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [1280, -120]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "1. Set Parameters", "type": "main", "index": 0 }]]
+    },
+    "Manual Trigger": {
+      "main": [[{ "node": "1. Set Parameters", "type": "main", "index": 0 }]]
+    },
+    "1. Set Parameters": {
+      "main": [[{ "node": "2. Execute Nuclei", "type": "main", "index": 0 }]]
+    },
+    "2. Execute Nuclei": {
+      "main": [[{ "node": "3. Parse Nuclei Output", "type": "main", "index": 0 }]]
+    },
+    "3. Parse Nuclei Output": {
+      "main": [[{ "node": "4. Save Results", "type": "main", "index": 0 }]]
+    },
+    "4. Save Results": {
+      "main": [[{ "node": "5. Generate HTML Report", "type": "main", "index": 0 }]]
+    },
+    "5. Generate HTML Report": {
+      "main": [[{ "node": "6. Save HTML Report", "type": "main", "index": 0 }]]
+    }
+  }
+}

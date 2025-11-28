@@ -1,0 +1,813 @@
+{
+  "name": "Phase 1: Passive Reconnaissance",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phase1-passive-recon",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Start Phase 1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "phase1-passive-recon"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT rs.*, sd.stealth_level, sd.rate_limit_per_sec, sd.scope_name\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.body.session_id }}'\nAND rs.status IN ('initiated', 'phase1_started')",
+        "options": {}
+      },
+      "id": "load-session",
+      "name": "Load Session Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $('Load Session Details').all().length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "validate-session",
+      "name": "Validate Session Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"error\": \"Session not found or invalid status\", \"session_id\": $('Webhook: Start Phase 1').item.json.body.session_id} }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "error-session-not-found",
+      "name": "Error: Session Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 450]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE recon_sessions SET status = 'phase1_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
+        "options": {}
+      },
+      "id": "update-session-phase1",
+      "name": "Update Session: Phase 1 Started",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [900, 150],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_started',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "checkpoint-phase1-start",
+      "name": "Checkpoint: Phase 1 Start",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1120, 150],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=subfinder -d {{ $('Load Session Details').item.json.target }} -silent -all -recursive -o /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt && cat /tmp/subfinder_{{ $('Webhook: Start Phase 1').item.json.body.session_id }}.txt"
+      },
+      "id": "subfinder-enum",
+      "name": "Subfinder: Subdomain Enumeration",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1340, 40],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "command": "=amass enum -passive -d {{ $('Load Session Details').item.json.target }} -silent -timeout 5 && cat ~/.config/amass/amass.txt 2>/dev/null || echo ''"
+      },
+      "id": "amass-enum",
+      "name": "Amass: Passive DNS Enumeration",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1340, 180],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=https://crt.sh/?q=%.{{ $('Load Session Details').item.json.target }}&output=json",
+        "options": {}
+      },
+      "id": "crtsh-lookup",
+      "name": "crt.sh: Certificate Transparency",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 320],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=https://api.shodan.io/dns/domain/{{ $('Load Session Details').item.json.target }}?key={{ $env.SHODAN_API_KEY }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "shodan-lookup",
+      "name": "Shodan: Domain Lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 460],
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://search.censys.io/api/v2/hosts/search?q={{ $('Load Session Details').item.json.target }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "censys-lookup",
+      "name": "Censys: Host Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 600],
+      "alwaysOutputData": true,
+      "continueOnFail": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "2",
+          "name": "Censys API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/domains/{{ $('Load Session Details').item.json.target }}",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-apikey",
+              "value": "={{ $env.VIRUSTOTAL_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "virustotal-lookup",
+      "name": "VirusTotal: Domain Reputation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 740],
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "command": "=whois {{ $('Load Session Details').item.json.target }} | grep -E '(OrgName|Organization|NetRange|CIDR|ASN|OriginAS)' || echo ''"
+      },
+      "id": "whois-lookup",
+      "name": "Whois: ASN & Network Info",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1340, 880],
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition"
+      },
+      "id": "merge-subdomain-results",
+      "name": "Merge Subdomain Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1560, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and deduplicate subdomains from all sources\nconst subdomains = new Set();\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\n// Parse Subfinder output (line-separated)\nconst subfinderData = $('Subfinder: Subdomain Enumeration').first().json.stdout || '';\nsubfinderData.split('\\n').forEach(line => {\n  const subdomain = line.trim();\n  if (subdomain && subdomain.includes('.')) {\n    subdomains.add(subdomain.toLowerCase());\n  }\n});\n\n// Parse Amass output (line-separated)\nconst amassData = $('Amass: Passive DNS Enumeration').first().json.stdout || '';\namassData.split('\\n').forEach(line => {\n  const subdomain = line.trim();\n  if (subdomain && subdomain.includes('.')) {\n    subdomains.add(subdomain.toLowerCase());\n  }\n});\n\n// Parse crt.sh output (JSON array)\ntry {\n  const crtshData = $('crt.sh: Certificate Transparency').first().json;\n  if (Array.isArray(crtshData)) {\n    crtshData.forEach(entry => {\n      if (entry.name_value) {\n        entry.name_value.split('\\n').forEach(domain => {\n          const subdomain = domain.trim().replace('*.', '');\n          if (subdomain && subdomain.includes('.')) {\n            subdomains.add(subdomain.toLowerCase());\n          }\n        });\n      }\n    });\n  }\n} catch (e) {\n  console.log('crt.sh parsing error:', e.message);\n}\n\n// Convert to array and create output items\nconst results = Array.from(subdomains).map(subdomain => ({\n  session_id: sessionId,\n  target: target,\n  subdomain: subdomain,\n  source: 'passive_enum',\n  discovered_at: new Date().toISOString()\n}));\n\nconsole.log(`Found ${results.length} unique subdomains`);\n\nreturn results.map(item => ({json: item}));"
+      },
+      "id": "parse-subdomains",
+      "name": "Parse & Deduplicate Subdomains",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 180]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO subdomain_intel (session_id, target, subdomain, source, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.target }}',\n  '{{ $json.subdomain }}',\n  '{{ $json.source }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, subdomain) DO NOTHING",
+        "options": {}
+      },
+      "id": "store-subdomains",
+      "name": "Store Subdomains in DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2000, 180],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Shodan API response and store in passive_intel\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const shodanData = $('Shodan: Domain Lookup').first().json;\n  \n  if (!shodanData || shodanData.error) {\n    console.log('Shodan lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [];\n  \n  // Parse subdomain data\n  if (shodanData.subdomains && Array.isArray(shodanData.subdomains)) {\n    shodanData.subdomains.forEach(subdomain => {\n      results.push({\n        session_id: sessionId,\n        target: target,\n        intel_type: 'shodan_subdomain',\n        source: 'shodan',\n        data: { subdomain: subdomain },\n        discovered_at: new Date().toISOString()\n      });\n    });\n  }\n  \n  // Parse domain info\n  if (shodanData.domain) {\n    results.push({\n      session_id: sessionId,\n      target: target,\n      intel_type: 'shodan_domain_info',\n      source: 'shodan',\n      data: shodanData,\n      discovered_at: new Date().toISOString()\n    });\n  }\n  \n  console.log(`Parsed ${results.length} Shodan intel items`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Shodan parsing error:', e.message);\n  return [];\n}"
+      },
+      "id": "parse-shodan",
+      "name": "Parse Shodan Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 460]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO passive_intel (session_id, target, intel_type, source, data, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.target }}',\n  '{{ $json.intel_type }}',\n  '{{ $json.source }}',\n  '{{ $json.data }}'::jsonb,\n  '{{ $json.discovered_at }}',\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "store-shodan",
+      "name": "Store Shodan Intel",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1780, 460],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Censys API response\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const censysData = $('Censys: Host Search').first().json;\n  \n  if (!censysData || censysData.error || !censysData.result) {\n    console.log('Censys lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [];\n  \n  if (censysData.result.hits && Array.isArray(censysData.result.hits)) {\n    censysData.result.hits.forEach(hit => {\n      results.push({\n        session_id: sessionId,\n        target: target,\n        intel_type: 'censys_host',\n        source: 'censys',\n        data: hit,\n        discovered_at: new Date().toISOString()\n      });\n    });\n  }\n  \n  console.log(`Parsed ${results.length} Censys intel items`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Censys parsing error:', e.message);\n  return [];\n}"
+      },
+      "id": "parse-censys",
+      "name": "Parse Censys Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO passive_intel (session_id, target, intel_type, source, data, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.target }}',\n  '{{ $json.intel_type }}',\n  '{{ $json.source }}',\n  '{{ $json.data }}'::jsonb,\n  '{{ $json.discovered_at }}',\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "store-censys",
+      "name": "Store Censys Intel",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1780, 600],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse VirusTotal API response\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const vtData = $('VirusTotal: Domain Reputation').first().json;\n  \n  if (!vtData || vtData.error || !vtData.data) {\n    console.log('VirusTotal lookup failed or returned error');\n    return [];\n  }\n  \n  const results = [{\n    session_id: sessionId,\n    target: target,\n    intel_type: 'virustotal_domain',\n    source: 'virustotal',\n    data: {\n      reputation: vtData.data.attributes?.reputation || 0,\n      last_analysis_stats: vtData.data.attributes?.last_analysis_stats || {},\n      categories: vtData.data.attributes?.categories || {},\n      creation_date: vtData.data.attributes?.creation_date,\n      last_modification_date: vtData.data.attributes?.last_modification_date\n    },\n    discovered_at: new Date().toISOString()\n  }];\n  \n  console.log(`Parsed VirusTotal domain reputation`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('VirusTotal parsing error:', e.message);\n  return [];\n}"
+      },
+      "id": "parse-virustotal",
+      "name": "Parse VirusTotal Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 740]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO passive_intel (session_id, target, intel_type, source, data, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.target }}',\n  '{{ $json.intel_type }}',\n  '{{ $json.source }}',\n  '{{ $json.data }}'::jsonb,\n  '{{ $json.discovered_at }}',\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "store-virustotal",
+      "name": "Store VirusTotal Intel",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1780, 740],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Whois output for ASN and network information\nconst sessionId = $('Webhook: Start Phase 1').item.json.body.session_id;\nconst target = $('Load Session Details').item.json.target;\n\ntry {\n  const whoisData = $('Whois: ASN & Network Info').first().json.stdout || '';\n  \n  if (!whoisData || whoisData.trim() === '') {\n    console.log('Whois lookup failed or returned no data');\n    return [];\n  }\n  \n  // Parse whois output\n  const lines = whoisData.split('\\n');\n  const parsed = {};\n  \n  lines.forEach(line => {\n    const match = line.match(/^([^:]+):\\s*(.+)$/);\n    if (match) {\n      const key = match[1].trim().toLowerCase().replace(/\\s+/g, '_');\n      const value = match[2].trim();\n      parsed[key] = value;\n    }\n  });\n  \n  const results = [{\n    session_id: sessionId,\n    target: target,\n    intel_type: 'whois_network',\n    source: 'whois',\n    data: parsed,\n    discovered_at: new Date().toISOString()\n  }];\n  \n  console.log(`Parsed Whois network information`);\n  return results.map(item => ({json: item}));\n  \n} catch (e) {\n  console.log('Whois parsing error:', e.message);\n  return [];\n}"
+      },
+      "id": "parse-whois",
+      "name": "Parse Whois Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 880]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO passive_intel (session_id, target, intel_type, source, data, discovered_at, created_at)\nVALUES (\n  '{{ $json.session_id }}',\n  '{{ $json.target }}',\n  '{{ $json.intel_type }}',\n  '{{ $json.source }}',\n  '{{ $json.data }}'::jsonb,\n  '{{ $json.discovered_at }}',\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "store-whois",
+      "name": "Store Whois Intel",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1780, 880],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      },
+      "id": "wait-all-passive",
+      "name": "Wait for All Passive Intel",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [2000, 460]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE recon_sessions SET status = 'phase1_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
+        "options": {}
+      },
+      "id": "update-session-phase1-complete",
+      "name": "Update Session: Phase 1 Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2220, 460],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}',\n  'phase1',\n  'passive_recon_completed',\n  '{\"target\": \"{{ $('Load Session Details').item.json.target }}\", \"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "checkpoint-phase1-complete",
+      "name": "Checkpoint: Phase 1 Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2440, 460],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) as subdomain_count FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 1').item.json.body.session_id }}'",
+        "options": {}
+      },
+      "id": "count-subdomains",
+      "name": "Count Discovered Subdomains",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2660, 460],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase2-active-recon",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"session_id\": $('Webhook: Start Phase 1').item.json.body.session_id, \"target\": $('Load Session Details').item.json.target, \"subdomain_count\": $('Count Discovered Subdomains').item.json.subdomain_count, \"source\": \"phase1\" } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase2",
+      "name": "Trigger Phase 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 460],
+      "notes": "Starts Phase 2: Active Reconnaissance after passive recon completes",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"phase1_completed\",\n  \"session_id\": $('Webhook: Start Phase 1').item.json.body.session_id,\n  \"target\": $('Load Session Details').item.json.target,\n  \"subdomains_discovered\": $('Count Discovered Subdomains').item.json.subdomain_count,\n  \"phase2_triggered\": $('Trigger Phase 2').item.json.statusCode === 200,\n  \"message\": \"Passive reconnaissance completed successfully\"\n} }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond: Phase 1 Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3100, 460]
+    }
+  ],
+  "connections": {
+    "Webhook: Start Phase 1": {
+      "main": [
+        [
+          {
+            "node": "Load Session Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Session Details": {
+      "main": [
+        [
+          {
+            "node": "Validate Session Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Session Exists": {
+      "main": [
+        [
+          {
+            "node": "Update Session: Phase 1 Started",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Session Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Session: Phase 1 Started": {
+      "main": [
+        [
+          {
+            "node": "Checkpoint: Phase 1 Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checkpoint: Phase 1 Start": {
+      "main": [
+        [
+          {
+            "node": "Subfinder: Subdomain Enumeration",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Amass: Passive DNS Enumeration",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "crt.sh: Certificate Transparency",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Shodan: Domain Lookup",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Censys: Host Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "VirusTotal: Domain Reputation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Whois: ASN & Network Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subfinder: Subdomain Enumeration": {
+      "main": [
+        [
+          {
+            "node": "Merge Subdomain Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Amass: Passive DNS Enumeration": {
+      "main": [
+        [
+          {
+            "node": "Merge Subdomain Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "crt.sh: Certificate Transparency": {
+      "main": [
+        [
+          {
+            "node": "Merge Subdomain Results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Subdomain Results": {
+      "main": [
+        [
+          {
+            "node": "Parse & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Deduplicate Subdomains": {
+      "main": [
+        [
+          {
+            "node": "Store Subdomains in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Subdomains in DB": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Passive Intel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shodan: Domain Lookup": {
+      "main": [
+        [
+          {
+            "node": "Parse Shodan Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Shodan Results": {
+      "main": [
+        [
+          {
+            "node": "Store Shodan Intel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Shodan Intel": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Passive Intel",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Censys: Host Search": {
+      "main": [
+        [
+          {
+            "node": "Parse Censys Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Censys Results": {
+      "main": [
+        [
+          {
+            "node": "Store Censys Intel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Censys Intel": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Passive Intel",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "VirusTotal: Domain Reputation": {
+      "main": [
+        [
+          {
+            "node": "Parse VirusTotal Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse VirusTotal Results": {
+      "main": [
+        [
+          {
+            "node": "Store VirusTotal Intel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store VirusTotal Intel": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Passive Intel",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Whois: ASN & Network Info": {
+      "main": [
+        [
+          {
+            "node": "Parse Whois Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Whois Results": {
+      "main": [
+        [
+          {
+            "node": "Store Whois Intel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Whois Intel": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Passive Intel",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Wait for All Passive Intel": {
+      "main": [
+        [
+          {
+            "node": "Update Session: Phase 1 Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Session: Phase 1 Complete": {
+      "main": [
+        [
+          {
+            "node": "Checkpoint: Phase 1 Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checkpoint: Phase 1 Complete": {
+      "main": [
+        [
+          {
+            "node": "Count Discovered Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Discovered Subdomains": {
+      "main": [
+        [
+          {
+            "node": "Trigger Phase 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Phase 2": {
+      "main": [
+        [
+          {
+            "node": "Respond: Phase 1 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "pinData": {},
+  "versionId": "1"
+}

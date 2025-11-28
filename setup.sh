@@ -155,11 +155,15 @@ create_env_file() {
     POSTGRES_PASSWORD=$(generate_password 32)
     N8N_PASSWORD=$(generate_password 24)
     ENCRYPTION_KEY=$(generate_hex_key 32)
+    MINIO_PASSWORD=$(generate_password 24)
+    CREDENTIAL_KEY=$(generate_hex_key 16)
 
     # Export for use in create_credentials_file()
     export POSTGRES_PASSWORD
     export N8N_PASSWORD
     export ENCRYPTION_KEY
+    export MINIO_PASSWORD
+    export CREDENTIAL_KEY
 
     # Create .env file
     cat > .env << EOF
@@ -190,6 +194,34 @@ WEBHOOK_URL=http://localhost
 
 # Timezone
 TIMEZONE=UTC
+
+# MinIO Object Storage
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}
+
+# Credential Encryption Key (for secure credential storage)
+CREDENTIAL_ENCRYPTION_KEY=${CREDENTIAL_KEY}
+
+# ============================================================================
+# LLM Configuration
+# ============================================================================
+
+# Model Profile Selection
+# Options: minimal, efficient, standard, full, custom
+# - minimal:   Ultra-lightweight (~3GB) - llama3.2:1b, phi3:mini, nomic-embed-text
+# - efficient: Auto-quantized (~8GB) - llama3.2:1b, llama2:7b, mistral:7b-instruct, nomic-embed-text
+# - standard:  Balanced (~13GB) - Multiple small + 7-8B models
+# - full:      Complete suite (~25GB) - All models including code analysis (10 models)
+# - custom:    Define your own via LLM_CUSTOM_MODELS
+LLM_MODEL_PROFILE=efficient
+
+# Custom Models (only used when LLM_MODEL_PROFILE=custom)
+# Comma-separated list of model names
+# Example: LLM_CUSTOM_MODELS=llama3.2:1b,mistral:7b-instruct-q4_0,nomic-embed-text
+# LLM_CUSTOM_MODELS=
+
+# Optional: Slack Webhook for Notifications
+# SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx/xxx/xxx
 EOF
 
     print_success ".env file created successfully"
@@ -261,6 +293,26 @@ Generated: $(date)
 
    ⚠️  IF YOU LOSE THIS KEY, ALL ENCRYPTED CREDENTIALS IN n8n WILL BE
       PERMANENTLY LOST! Store it in a password manager NOW!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📦 MinIO Object Storage
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+   Console:  http://localhost:9001
+   API:      http://localhost:9000
+   Username: minioadmin
+   Password: ${MINIO_PASSWORD}
+
+   Buckets:  raw-evidence, reports
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 Redis Cache
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+   Host:     localhost:6379
+   Purpose:  Job queues, ephemeral credential storage
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
@@ -384,18 +436,106 @@ setup_ollama() {
         return
     fi
 
-    # Pull llama3.2 model
-    print_info "Pulling llama3.2 model (2GB download - this may take a while)..."
+    # Get model profile from environment (default: standard)
+    MODEL_PROFILE=${LLM_MODEL_PROFILE:-standard}
+
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  MODEL PROFILE: ${YELLOW}${MODEL_PROFILE}${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    if docker exec recon_ollama ollama pull llama3.2; then
-        print_success "llama3.2 model pulled successfully"
-    else
-        print_warning "Failed to pull llama3.2 model"
-        print_info "You can pull it manually later with:"
-        echo "         docker exec recon_ollama ollama pull llama3.2"
-    fi
+    # Define models based on profile
+    case $MODEL_PROFILE in
+        minimal)
+            print_info "Minimal profile: Ultra-lightweight models only (~3GB total)"
+            echo ""
+            MODELS=(
+                "llama3.2:1b:~1GB - Ultra-fast reasoning (1B params)"
+                "phi3:mini:~2.3GB - Microsoft Phi-3 Mini (3.8B params)"
+                "nomic-embed-text:~274MB - Embeddings for RAG"
+            )
+            ;;
+        efficient)
+            print_info "Efficient profile: Quantized models for low memory (~8GB total)"
+            echo ""
+            MODELS=(
+                "llama3.2:1b:~1GB - Ultra-fast reasoning"
+                "llama2:7b:~3.8GB - Llama-2 7B (auto-quantized)"
+                "mistral:7b-instruct:~4GB - Mistral 7B instruction tuned"
+                "nomic-embed-text:~274MB - Embeddings for RAG"
+            )
+            ;;
+        standard)
+            print_info "Standard profile: Balanced models (~13GB total)"
+            echo ""
+            MODELS=(
+                "llama3.2:1b:~1GB - Ultra-fast lightweight"
+                "llama3.2:~2GB - Main reasoning model"
+                "llama3:8b:~4.7GB - Llama-3 8B (auto-quantized)"
+                "mistral:7b-instruct:~4GB - Mistral 7B instruction tuned"
+                "nomic-embed-text:~274MB - Embeddings for RAG"
+            )
+            ;;
+        full)
+            print_info "Full profile: Complete model suite (~25GB total)"
+            echo ""
+            MODELS=(
+                "llama3.2:1b:~1GB - Ultra-fast lightweight (1B params)"
+                "llama3.2:3b:~2GB - Standard reasoning (3B params)"
+                "llama2:7b:~3.8GB - Llama-2 7B (auto-quantized)"
+                "llama3:8b:~4.7GB - Llama-3 8B (auto-quantized)"
+                "mistral:7b-instruct:~4GB - Mistral 7B instruction tuned"
+                "phi3:mini:~2.3GB - Microsoft Phi-3 Mini (3.8B)"
+                "gemma:2b:~1.6GB - Google Gemma 2B"
+                "codellama:7b:~4GB - Code analysis model"
+                "deepseek-coder:6.7b:~3.8GB - Code-specialized model"
+                "nomic-embed-text:~274MB - Embeddings for RAG"
+            )
+            ;;
+        custom)
+            print_info "Custom profile: Using models from LLM_CUSTOM_MODELS env var"
+            echo ""
+            if [ -z "$LLM_CUSTOM_MODELS" ]; then
+                print_error "LLM_CUSTOM_MODELS environment variable not set!"
+                return
+            fi
+            IFS=',' read -ra MODELS <<< "$LLM_CUSTOM_MODELS"
+            ;;
+        *)
+            print_warning "Unknown profile '$MODEL_PROFILE', using 'standard'"
+            MODEL_PROFILE="standard"
+            MODELS=(
+                "llama3.2:~2GB - Main reasoning model"
+                "mistral:7b-instruct:~4GB - Fast instruction following"
+                "nomic-embed-text:~274MB - Embeddings for RAG"
+            )
+            ;;
+    esac
 
+    # Pull each model
+    for model_spec in "${MODELS[@]}"; do
+        # Extract model name and description
+        model_name=$(echo "$model_spec" | cut -d':' -f1-2)
+        model_desc=$(echo "$model_spec" | cut -d':' -f3-)
+
+        echo ""
+        print_info "Pulling ${CYAN}${model_name}${NC} ${model_desc}"
+        echo ""
+
+        if docker exec recon_ollama ollama pull "$model_name"; then
+            print_success "${model_name} pulled successfully"
+        else
+            print_warning "Failed to pull ${model_name}"
+            print_info "You can pull it manually later with:"
+            echo "         docker exec recon_ollama ollama pull ${model_name}"
+        fi
+    done
+
+    echo ""
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    print_success "Ollama model setup complete!"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 }
 
@@ -470,13 +610,31 @@ verify_installation() {
         print_warning "Ollama LLM container is NOT running"
     fi
 
+    if docker compose ps | grep -q "recon_redis.*Up"; then
+        print_success "Redis container is running"
+    else
+        print_warning "Redis container is NOT running"
+    fi
+
+    if docker compose ps | grep -q "recon_minio.*Up"; then
+        print_success "MinIO container is running"
+    else
+        print_warning "MinIO container is NOT running"
+    fi
+
+    if docker compose ps | grep -q "recon_chroma.*Up"; then
+        print_success "Chroma vector DB container is running"
+    else
+        print_warning "Chroma vector DB container is NOT running"
+    fi
+
     # Check network
     if docker network ls | grep -q "recon_network"; then
         print_success "Recon network created"
     fi
 
     # Check volumes
-    for vol in recon_postgres_data recon_n8n_data recon_workspace recon_loot; do
+    for vol in recon_postgres_data recon_n8n_data recon_workspace recon_loot recon_redis_data recon_minio_data recon_ollama_data recon_chroma_data; do
         if docker volume ls | grep -q "$vol"; then
             print_success "Volume '$vol' created"
         fi
@@ -513,6 +671,19 @@ verify_tools() {
     docker compose exec -T n8n-recon bash -c "searchsploit -h | head -1" && print_success "searchsploit (exploitdb)"
     docker compose exec -T n8n-recon bash -c "ls /usr/share/nmap/scripts/vulners.nse" > /dev/null && print_success "nmap vulners script"
     docker compose exec -T n8n-recon bash -c "ls /usr/share/nmap/scripts/vulscan/" > /dev/null && print_success "nmap vulscan script"
+
+    echo ""
+    echo -e "${CYAN}Pivot Tools (v3):${NC}"
+    docker compose exec -T n8n-recon bash -c "which proxychains 2>/dev/null || which proxychains4 2>/dev/null" > /dev/null && print_success "proxychains"
+    docker compose exec -T n8n-recon bash -c "which sshpass" > /dev/null && print_success "sshpass"
+    docker compose exec -T n8n-recon bash -c "which nc" > /dev/null && print_success "netcat"
+    docker compose exec -T n8n-recon bash -c "which ssh" > /dev/null && print_success "ssh client"
+
+    echo ""
+    echo -e "${CYAN}Cloud Tools (v4):${NC}"
+    docker compose exec -T n8n-recon bash -c "az --version 2>&1 | head -1" && print_success "Azure CLI"
+    docker compose exec -T n8n-recon bash -c "scout --version 2>&1 | head -1" && print_success "ScoutSuite"
+    docker compose exec -T n8n-recon bash -c "roadrecon --help 2>&1 | head -1" && print_success "ROADrecon"
 
     echo ""
 }
@@ -573,11 +744,34 @@ print_final_info() {
     echo -e "${CYAN}  DATABASE TABLES${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ✓ subdomain_intel        ✓ network_scans"
-    echo -e "  ✓ smb_enum              ✓ vulnerabilities"
-    echo -e "  ✓ fuzzing_results       ✓ credentials"
-    echo -e "  ✓ web_technologies      ✓ nuclei_results"
-    echo -e "  ✓ sqli_results          ✓ recon_sessions"
+    echo -e "  ${MAGENTA}Core (Phase A):${NC}"
+    echo -e "  ✓ projects              ✓ hosts                 ✓ ports"
+    echo -e "  ✓ evidence              ✓ scan_jobs             ✓ rate_limits"
+    echo -e "  ✓ audit_log             ✓ system_config"
+    echo ""
+    echo -e "  ${MAGENTA}Credentials (Phase B):${NC}"
+    echo -e "  ✓ secure_credentials    ✓ credential_usage      ✓ relationships"
+    echo -e "  ✓ credential_test_queue"
+    echo ""
+    echo -e "  ${MAGENTA}Findings (Phase C):${NC}"
+    echo -e "  ✓ findings              ✓ loot                  ✓ enrichment"
+    echo -e "  ✓ notifications         ✓ approval_queue"
+    echo ""
+    echo -e "  ${MAGENTA}Pivoting (Phase D):${NC}"
+    echo -e "  ✓ ssh_tunnels           ✓ pivot_queue           ✓ internal_networks"
+    echo -e "  ✓ proxy_chains"
+    echo ""
+    echo -e "  ${MAGENTA}Cloud (Phase E):${NC}"
+    echo -e "  ✓ azure_tenants         ✓ azure_subscriptions   ✓ azure_resources"
+    echo -e "  ✓ azure_ad_objects      ✓ azure_role_assignments"
+    echo -e "  ✓ cloud_findings        ✓ cloud_credential_cache"
+    echo ""
+    echo -e "  ${MAGENTA}RAG & Learning (Phase F):${NC}"
+    echo -e "  ✓ knowledge_vectors     ✓ tool_success_metrics  ✓ attack_patterns"
+    echo -e "  ✓ agent_decisions       ✓ learning_feedback"
+    echo ""
+    echo -e "  ${MAGENTA}Legacy:${NC}"
+    echo -e "  ✓ subdomain_intel       ✓ network_scans         ✓ recon_sessions"
     echo ""
     echo -e "  ${MAGENTA}Note:${NC} Database migrations from migrations/ automatically applied"
     echo ""
@@ -594,25 +788,64 @@ print_final_info() {
     echo ""
 
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  NEXT STEPS${NC}"
+    echo -e "${CYAN}  NEXT STEPS - AUTONOMOUS AGENT SYSTEM${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ${YELLOW}To use the Agentic Pentest Demo:${NC}"
+    echo -e "  ${YELLOW}Step 1: LLM Models Configuration${NC}"
+    echo ""
+    echo -e "  Current profile: ${GREEN}${LLM_MODEL_PROFILE:-efficient}${NC}"
+    echo -e "  Models already pulled during setup (if Ollama was running)"
+    echo ""
+    echo -e "  ${CYAN}To manage models:${NC}"
+    echo -e "  ${GREEN}./manage-models.sh list${NC}                  # List installed models"
+    echo -e "  ${GREEN}./manage-models.sh pull-profile minimal${NC}  # Pull minimal set (~2GB)"
+    echo -e "  ${GREEN}./manage-models.sh pull-profile efficient${NC} # Pull efficient set (~5GB)"
+    echo -e "  ${GREEN}./manage-models.sh pull-profile standard${NC} # Pull standard set (~10GB)"
+    echo -e "  ${GREEN}./manage-models.sh pull-profile full${NC}     # Pull full set (~20GB)"
+    echo -e "  ${GREEN}./manage-models.sh info${NC}                  # Show model info & recommendations"
+    echo ""
+    echo -e "  ${CYAN}Or pull models manually:${NC}"
+    echo -e "  ${GREEN}docker exec recon_ollama ollama pull llama3.2:1b${NC}           # Ultra-fast 1B model"
+    echo -e "  ${GREEN}docker exec recon_ollama ollama pull mistral:7b-instruct-q4_0${NC} # Quantized Mistral"
+    echo -e "  ${GREEN}docker exec recon_ollama ollama pull llama3:7b-q4_0${NC}       # Quantized Llama-3"
+    echo ""
+    echo -e "  ${YELLOW}Step 2: Import Workflows (IN ORDER - Critical!)${NC}"
     echo -e "  1. Open ${GREEN}http://localhost:5678${NC} and login"
-    echo -e "  2. Import ${YELLOW}workflows/agentic_pentest_demo.json${NC}"
-    echo -e "  3. Activate the workflow"
-    echo -e "  4. Test: ${GREEN}curl -X POST http://localhost/webhook/pentest -H 'Content-Type: application/json' -d '{\"target\": \"example.com\"}'${NC}"
+    echo -e "  2. Import workflows from ${YELLOW}workflows/${NC} directory IN THIS ORDER:"
+    echo -e "     ${MAGENTA}Foundation (1-6):${NC}"
+    echo -e "     01_rag_query_helper.json → 02_knowledge_embedder.json → 03_learning_extractor.json"
+    echo -e "     04_tool_analyzer.json → 05_feedback_processor.json → 06_feed_ingestor.json"
+    echo -e "     ${MAGENTA}Agents (7-12):${NC}"
+    echo -e "     07_agent_orchestrator.json → 08_agent_recon.json → 09_agent_web.json"
+    echo -e "     10_agent_network.json → 11_agent_cloud.json → 12_agent_api.json"
+    echo -e "     ${MAGENTA}Exploitation (13-14):${NC}"
+    echo -e "     13_approval_handler.json → 14_exploit_runner.json"
     echo ""
-    echo -e "  ${YELLOW}To use the Web Interface:${NC}"
+    echo -e "  ${YELLOW}Step 3: Create Test Project${NC}"
+    echo -e "  ${GREEN}docker exec -it recon_postgres psql -U recon_user -d recon_hub -c \"INSERT INTO projects (name, scope) VALUES ('Test', '[\\\"scanme.nmap.org\\\"]') RETURNING id;\"${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Step 4: Test Autonomous System${NC}"
+    echo -e "  ${GREEN}curl -X POST http://localhost:5678/webhook/agent/orchestrate \\${NC}"
+    echo -e "  ${GREEN}  -H 'Content-Type: application/json' \\${NC}"
+    echo -e "  ${GREEN}  -d '{\"target\": \"scanme.nmap.org\", \"project_id\": \"YOUR_UUID\", \"scan_mode\": \"quick\"}'${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Pivot Capability (v3):${NC}"
+    echo -e "  - Auto-pivots on SSH credential success"
+    echo -e "  - Max 4 hops, tunnels last until project ends"
+    echo -e "  - Full internal recon through SOCKS proxies"
+    echo -e "  - View active tunnels: ${GREEN}SELECT * FROM active_tunnels;${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Cloud Scanning (v4):${NC}"
+    echo -e "  1. Import ${YELLOW}workflows/pentest_v4_cloud.json${NC}"
+    echo -e "  2. Add Azure credential to secure_credentials (type: azure_service_principal)"
+    echo -e "  3. Test: ${GREEN}curl -X POST http://localhost/webhook/pentest/v4/cloud -H 'Content-Type: application/json' -d '{\"project_id\": \"UUID\", \"tenant_id\": \"TENANT\", \"credential_id\": \"CRED_UUID\", \"scan_mode\": \"full-cloud\"}'${NC}"
+    echo -e "  - Scan modes: aad-enum, resource-discovery, blob-scan, privilege-audit, keyvault-access, api-abuse, full-cloud"
+    echo -e "  - Uses Azure CLI + ScoutSuite + ROADrecon"
+    echo -e "  - Findings saved to cloud_findings table"
+    echo ""
+    echo -e "  ${YELLOW}Legacy Web Interface:${NC}"
     echo -e "  1. Import workflow from ${YELLOW}web-interface/n8n-recon-workflow.json${NC}"
-    echo -e "  2. Configure PostgreSQL credential in the workflow"
-    echo -e "  3. Activate the workflow"
-    echo -e "  4. Open ${GREEN}http://localhost:8080${NC} to submit targets"
-    echo ""
-    echo -e "  ${YELLOW}To create custom workflows:${NC}"
-    echo -e "  6. Use Execute Command nodes to run security tools"
-    echo -e "  7. Use PostgreSQL nodes to store results in database"
-    echo -e "  8. Check ${YELLOW}README.md${NC} for example workflow snippets"
+    echo -e "  2. Open ${GREEN}http://localhost:8080${NC} to submit targets"
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${GREEN}  Happy Hacking! 🎯 Use your powers responsibly! 🛡️${NC}"

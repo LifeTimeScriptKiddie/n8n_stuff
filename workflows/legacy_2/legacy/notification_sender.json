@@ -1,0 +1,236 @@
+{
+  "name": "Notification Sender",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  n.id,\n  n.project_id,\n  n.notification_type,\n  n.severity,\n  n.title,\n  n.message,\n  n.entity_type,\n  n.entity_id,\n  n.channels,\n  p.name as project_name,\n  p.settings\nFROM notifications n\nJOIN projects p ON p.id = n.project_id\nWHERE n.status = 'pending'\nORDER BY\n  CASE n.severity\n    WHEN 'critical' THEN 1\n    WHEN 'high' THEN 2\n    WHEN 'medium' THEN 3\n    ELSE 4\n  END,\n  n.created_at ASC\nLIMIT 20",
+        "options": {}
+      },
+      "name": "Get Pending Notifications",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-notifications",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Has Notifications?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare notification for sending\nconst notif = $input.first().json;\nconst channels = notif.channels || ['database'];\nconst settings = notif.settings || {};\n\n// Get severity emoji\nconst severityEmoji = {\n  critical: '🔴',\n  high: '🟠',\n  medium: '🟡',\n  low: '🟢',\n  info: 'ℹ️'\n};\n\nconst emoji = severityEmoji[notif.severity] || 'ℹ️';\n\n// Format message\nconst formattedMessage = `${emoji} *[${notif.project_name}]* ${notif.title}\\n\\n${notif.message}\\n\\nSeverity: ${notif.severity.toUpperCase()}\\nType: ${notif.notification_type}`;\n\nreturn [{\n  json: {\n    ...notif,\n    channels: channels,\n    formatted_message: formattedMessage,\n    slack_webhook: settings.slack_webhook || process.env.SLACK_WEBHOOK_URL,\n    email_to: settings.notification_email || process.env.NOTIFICATION_EMAIL\n  }\n}];"
+      },
+      "name": "Format Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-slack",
+              "leftValue": "={{ $json.channels.includes('slack') && $json.slack_webhook }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Send Slack?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.slack_webhook }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.formatted_message, username: 'Pentest Automation', icon_emoji: ':shield:' }) }}",
+        "options": {}
+      },
+      "name": "Send to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mark notification as sent\nUPDATE notifications\nSET\n  status = 'sent',\n  sent_at = NOW(),\n  delivered_to = delivered_to || '{{ JSON.stringify({ slack: true, sent_at: new Date().toISOString() }) }}'::jsonb\nWHERE id = '{{ $json.id }}'::uuid",
+        "options": {}
+      },
+      "name": "Mark Slack Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1520, 100],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mark as sent (database-only notification)\nUPDATE notifications\nSET\n  status = 'sent',\n  sent_at = NOW(),\n  delivered_to = delivered_to || '{\"database\": true}'::jsonb\nWHERE id = '{{ $json.id }}'::uuid",
+        "options": {}
+      },
+      "name": "Mark DB Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1300, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Minute": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Notifications": {
+      "main": [
+        [
+          {
+            "node": "Has Notifications?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Notifications?": {
+      "main": [
+        [
+          {
+            "node": "Format Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Format Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Slack?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack?": {
+      "main": [
+        [
+          {
+            "node": "Send to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark DB Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Slack": {
+      "main": [
+        [
+          {
+            "node": "Mark Slack Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

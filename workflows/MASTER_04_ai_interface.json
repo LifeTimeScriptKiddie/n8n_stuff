@@ -1,0 +1,304 @@
+{
+  "name": "MASTER: AI Interface",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-chat",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook: AI Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 400],
+      "webhookId": "ai-chat-master",
+      "id": "webhook-ai"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse incoming chat message\nconst input = $input.first().json;\nconst body = input.body || input;\n\nconst userMessage = (body.message || body.query || '').toString().trim();\nconst conversationId = (body.conversation_id || 'default').toString();\nconst projectId = body.project_id || null;\n\nreturn [{\n  json: {\n    user_message: userMessage || 'help',\n    conversation_id: conversationId,\n    project_id: projectId,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Parse Chat Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "id": "parse-input"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "llama3.2:latest"
+            },
+            {
+              "name": "prompt",
+              "value": "=You are a pentesting assistant. Parse the user's request and extract structured information.\n\nUser request: {{ $json.user_message }}\n\nExtract and return ONLY a JSON object with these fields:\n- intent: one of [\"scan\", \"exploit\", \"query\", \"status\", \"help\"]\n- target: domain, IP, or URL (if mentioned)\n- scan_mode: one of [\"quick\", \"standard\", \"thorough\"] (default: standard)\n- target_type: one of [\"web\", \"network\", \"cloud\", \"api\", \"auto\"] (default: auto)\n- focus: specific vulnerability type if mentioned (e.g., \"sql_injection\", \"xss\")\n- project_id: \"{{ $json.project_id || 'null' }}\"\n\nExamples:\n\"Scan example.com\" -> {\"intent\":\"scan\",\"target\":\"example.com\",\"scan_mode\":\"standard\",\"target_type\":\"auto\"}\n\"Check 10.0.0.1 for vulnerabilities\" -> {\"intent\":\"scan\",\"target\":\"10.0.0.1\",\"scan_mode\":\"standard\",\"target_type\":\"network\"}\n\"Quick web scan on https://test.com\" -> {\"intent\":\"scan\",\"target\":\"https://test.com\",\"scan_mode\":\"quick\",\"target_type\":\"web\"}\n\nReturn ONLY the JSON object, no explanation:"
+            },
+            {
+              "name": "stream",
+              "value": false
+            },
+            {
+              "name": "options",
+              "value": "={{ {\"temperature\": 0.1} }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Ollama: Parse Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 400],
+      "id": "ollama-parse",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract structured data from Ollama response\nconst ollamaResponse = $input.first().json.response || '';\nconst userMessage = $('Parse Chat Input').first().json.user_message;\n\n// Default values\nlet parsed = {\n  intent: 'help',\n  target: null,\n  scan_mode: 'standard',\n  target_type: 'auto',\n  focus: null,\n  project_id: null\n};\n\n// Try to extract JSON from response\nconst jsonMatch = ollamaResponse.match(/\\{[^}]+\\}/);\nif (jsonMatch) {\n  const temp = JSON.parse(jsonMatch[0]);\n  if (temp && typeof temp === 'object') {\n    parsed = Object.assign(parsed, temp);\n  }\n}\n\n// Clean up project_id\nif (parsed.project_id === 'null' || parsed.project_id === null) {\n  parsed.project_id = null;\n}\n\nreturn [{\n  json: {\n    intent: parsed.intent || 'help',\n    target: parsed.target || null,\n    scan_mode: parsed.scan_mode || 'standard',\n    target_type: parsed.target_type || 'auto',\n    focus: parsed.focus || null,\n    project_id: parsed.project_id,\n    user_message: userMessage,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Extract Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400],
+      "id": "extract-intent"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.intent }}",
+                    "operation": "equals",
+                    "value2": "scan"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "scan"
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.intent }}",
+                    "operation": "equals",
+                    "value2": "exploit"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "exploit"
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.intent }}",
+                    "operation": "equals",
+                    "value2": "query"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "query"
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.intent }}",
+                    "operation": "equals",
+                    "value2": "status"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "status"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1120, 400],
+      "id": "route-intent"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/pentest/v2",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "target",
+              "value": "={{ $json.target }}"
+            },
+            {
+              "name": "project_id",
+              "value": "={{ $json.project_id || 'auto-generated' }}"
+            },
+            {
+              "name": "mode",
+              "value": "={{ $json.scan_mode }}"
+            },
+            {
+              "name": "source",
+              "value": "ai-chat"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Action: Start Scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 200],
+      "id": "action-scan",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Get recent scan jobs\nSELECT id, target, status, job_type, created_at\nFROM scan_jobs\nORDER BY created_at DESC\nLIMIT 10;",
+        "options": {}
+      },
+      "name": "Action: Get Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1340, 400],
+      "id": "action-status",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/rag-query",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.user_message }}"
+            },
+            {
+              "name": "project_id",
+              "value": "={{ $json.project_id }}"
+            },
+            {
+              "name": "limit",
+              "value": "5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Action: RAG Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 600],
+      "id": "action-query",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate help response\nconst helpText = `🤖 AI Pentesting Assistant\n\nI can help you with:\n\n**Scanning Commands:**\n- \"Scan example.com\" - Start a security scan\n- \"Quick scan on 10.0.0.1\" - Fast network scan\n- \"Thorough web test on https://target.com\" - Deep web scan\n\n**Status Commands:**\n- \"Show scan status\" - View recent scans\n- \"What's running?\" - Check active jobs\n\n**Query Commands:**\n- \"Show me SQL injection findings\" - Query knowledge base\n- \"What vulnerabilities did we find?\" - Search results\n\n**Examples:**\n- \"Scan hackthebox.com for SQL injection\"\n- \"Run a quick network scan on 192.168.1.0/24\"\n- \"Check status of my scans\"\n- \"What are the latest CVEs?\"\n\nJust type naturally and I'll understand! 🎯`;\n\nreturn [{\n  json: {\n    response: helpText,\n    type: 'help',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Action: Help",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 800],
+      "id": "action-help"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Format response based on action type\nconst input = $input.first().json;\nconst intent = $('Extract Intent').first().json.intent;\nconst userMessage = $('Parse Chat Input').first().json.user_message;\n\nlet response = '';\nlet metadata = {};\n\nif (intent === 'scan') {\n  const scanResult = input;\n  if (scanResult.success) {\n    response = `✅ **Scan Started Successfully!**\\n\\n`;\n    response += `🎯 Target: ${scanResult.target || 'N/A'}\\n`;\n    response += `📋 Job ID: ${scanResult.scan_job_id || 'N/A'}\\n`;\n    response += `🤖 Agents: ${(scanResult.agents || []).join(', ')}\\n\\n`;\n    response += `The scan is now running. Use \"show status\" to check progress.`;\n    metadata = { scan_job_id: scanResult.scan_job_id };\n  } else {\n    response = `❌ Scan failed to start. ${scanResult.error || 'Unknown error'}`;\n  }\n} else if (intent === 'status') {\n  const jobs = $input.all();\n  if (jobs.length === 0) {\n    response = '📭 No recent scans found.';\n  } else {\n    response = '📊 **Recent Scan Jobs:**\\n\\n';\n    jobs.slice(0, 5).forEach((job, i) => {\n      const j = job.json;\n      response += `${i + 1}. **${j.target}** - ${j.status}\\n`;\n      response += `   Type: ${j.job_type} | Created: ${new Date(j.created_at).toLocaleString()}\\n\\n`;\n    });\n  }\n} else if (intent === 'query') {\n  response = `🔍 **Search Results:**\\n\\n${JSON.stringify(input, null, 2)}`;\n} else if (intent === 'help') {\n  response = input.response;\n} else {\n  response = `I understood your request: \"${userMessage}\"\\n\\nBut I'm not sure how to handle that yet. Type \"help\" for available commands.`;\n}\n\nreturn [{\n  json: {\n    response: response,\n    intent: intent,\n    metadata: metadata,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400],
+      "id": "format-response"
+    },
+    {
+      "parameters": {
+        "mode": "respondToWebhook",
+        "respondWith": "json",
+        "responseBody": "={{ {\n  success: true,\n  response: $json.response,\n  intent: $json.intent,\n  metadata: $json.metadata || {},\n  timestamp: $json.timestamp\n} }}"
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 400],
+      "id": "webhook-response"
+    }
+  ],
+  "connections": {
+    "Webhook: AI Chat": {
+      "main": [[{"node": "Parse Chat Input", "type": "main", "index": 0}]]
+    },
+    "Parse Chat Input": {
+      "main": [[{"node": "Ollama: Parse Intent", "type": "main", "index": 0}]]
+    },
+    "Ollama: Parse Intent": {
+      "main": [[{"node": "Extract Intent", "type": "main", "index": 0}]]
+    },
+    "Extract Intent": {
+      "main": [[{"node": "Route by Intent", "type": "main", "index": 0}]]
+    },
+    "Route by Intent": {
+      "main": [
+        [{"node": "Action: Start Scan", "type": "main", "index": 0}],
+        [],
+        [{"node": "Action: RAG Query", "type": "main", "index": 0}],
+        [{"node": "Action: Get Status", "type": "main", "index": 0}],
+        [{"node": "Action: Help", "type": "main", "index": 0}]
+      ]
+    },
+    "Action: Start Scan": {
+      "main": [[{"node": "Format Response", "type": "main", "index": 0}]]
+    },
+    "Action: Get Status": {
+      "main": [[{"node": "Format Response", "type": "main", "index": 0}]]
+    },
+    "Action: RAG Query": {
+      "main": [[{"node": "Format Response", "type": "main", "index": 0}]]
+    },
+    "Action: Help": {
+      "main": [[{"node": "Format Response", "type": "main", "index": 0}]]
+    },
+    "Format Response": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-24T20:30:00.000Z",
+  "versionId": "1"
+}

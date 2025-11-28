@@ -1,0 +1,216 @@
+{
+  "name": "MASTER: Agent Orchestration",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "seconds", "secondsInterval": 30}]
+        }
+      },
+      "name": "Database Polling Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 400],
+      "id": "db-poll-trigger"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pentest/v2",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook: Pentest V2",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 600],
+      "webhookId": "pentest-v2-master",
+      "id": "webhook-v2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get queued scan jobs\nSELECT id, project_id, target, job_type, scan_mode, status\nFROM scan_jobs\nWHERE status = 'queued'\nORDER BY priority DESC, queued_at ASC\nLIMIT 5;",
+        "options": {}
+      },
+      "name": "Get Queued Jobs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 400],
+      "id": "get-queued",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse webhook input\nconst input = $input.first().json;\nconst body = input.body || input;\n\nconst target = body.target;\nconst projectId = body.project_id;\nconst mode = body.mode || 'standard';\n\nif (!target || !projectId) {\n  throw new Error('target and project_id required');\n}\n\n// Detect target type\nlet targetType = 'network';\nconst targetStr = String(target);\n\nif (/^https?:\\/\\//.test(targetStr)) {\n  targetType = 'web';\n} else if (targetStr.includes('azure') || targetStr.includes('aws')) {\n  targetType = 'cloud';\n} else if (targetStr.includes('/api/')) {\n  targetType = 'api';\n}\n\nreturn [{\n  json: {\n    target: target,\n    project_id: projectId,\n    scan_mode: mode,\n    target_type: targetType,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Parse Webhook Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 600],
+      "id": "parse-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Has Jobs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "id": "has-jobs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Orchestrator: Decide which agents to run\nconst input = $input.first().json;\nconst targetType = input.target_type || 'network';\nconst scanMode = input.scan_mode || 'standard';\n\nconst agentsToRun = [];\n\n// Always start with recon\nagentsToRun.push('recon');\n\n// Add agents based on target type\nif (targetType === 'web') {\n  agentsToRun.push('web');\n} else if (targetType === 'network') {\n  agentsToRun.push('network');\n} else if (targetType === 'cloud') {\n  agentsToRun.push('cloud');\n} else if (targetType === 'api') {\n  agentsToRun.push('api');\n}\n\nreturn [{\n  json: {\n    ...input,\n    agents_to_run: agentsToRun,\n    orchestrator_decision: `Running ${agentsToRun.length} agents for ${targetType}`,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Orchestrator: Plan Execution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 500],
+      "id": "orchestrator"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agent: Recon\nconst input = $input.first().json;\nconst target = input.target;\n\nreturn [{\n  json: {\n    agent: 'recon',\n    target: target,\n    commands: [\n      `subfinder -d ${target}`,\n      `httpx -l ${target}`,\n      `nuclei -u ${target}`\n    ],\n    status: 'ready',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Agent: Recon",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "id": "agent-recon",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agent: Web\nconst input = $input.first().json;\nconst target = input.target;\n\nreturn [{\n  json: {\n    agent: 'web',\n    target: target,\n    commands: [\n      `nikto -h ${target}`,\n      `sqlmap -u ${target} --batch`,\n      `xsstrike -u ${target}`\n    ],\n    status: 'ready',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Agent: Web",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 450],
+      "id": "agent-web",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agent: Network\nconst input = $input.first().json;\nconst target = input.target;\n\nreturn [{\n  json: {\n    agent: 'network',\n    target: target,\n    commands: [\n      `nmap -sV ${target}`,\n      `nmap -sC ${target}`,\n      `nmap --script vuln ${target}`\n    ],\n    status: 'ready',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Agent: Network",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 600],
+      "id": "agent-network",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agent: Cloud\nconst input = $input.first().json;\nconst target = input.target;\n\nreturn [{\n  json: {\n    agent: 'cloud',\n    target: target,\n    commands: [\n      `az account list`,\n      `az vm list`,\n      `ScoutSuite azure`\n    ],\n    status: 'ready',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Agent: Cloud",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 750],
+      "id": "agent-cloud",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agent: API\nconst input = $input.first().json;\nconst target = input.target;\n\nreturn [{\n  json: {\n    agent: 'api',\n    target: target,\n    commands: [\n      `ffuf -u ${target}/FUZZ -w wordlist.txt`,\n      `arjun -u ${target}`,\n      `graphql-introspection ${target}`\n    ],\n    status: 'ready',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Agent: API",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 900],
+      "id": "agent-api",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all agent results\nconst agents = $input.all();\nconst results = {\n  total_agents: agents.length,\n  agents: agents.map(a => a.json),\n  timestamp: new Date().toISOString(),\n  status: 'agents_ready'\n};\n\nreturn [{json: results}];"
+      },
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 550],
+      "id": "aggregate"
+    },
+    {
+      "parameters": {
+        "mode": "respondToWebhook",
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, scan_job_id: $json.scan_job_id || 'N/A', agents: $json.agents_to_run } }}"
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 550],
+      "id": "webhook-response"
+    }
+  ],
+  "connections": {
+    "Database Polling Trigger": {
+      "main": [[{"node": "Get Queued Jobs", "type": "main", "index": 0}]]
+    },
+    "Webhook: Pentest V2": {
+      "main": [[{"node": "Parse Webhook Input", "type": "main", "index": 0}]]
+    },
+    "Get Queued Jobs": {
+      "main": [[{"node": "Has Jobs?", "type": "main", "index": 0}]]
+    },
+    "Parse Webhook Input": {
+      "main": [[{"node": "Orchestrator: Plan Execution", "type": "main", "index": 0}]]
+    },
+    "Has Jobs?": {
+      "main": [[{"node": "Orchestrator: Plan Execution", "type": "main", "index": 0}]]
+    },
+    "Orchestrator: Plan Execution": {
+      "main": [
+        [
+          {"node": "Agent: Recon", "type": "main", "index": 0},
+          {"node": "Agent: Web", "type": "main", "index": 0},
+          {"node": "Agent: Network", "type": "main", "index": 0},
+          {"node": "Agent: Cloud", "type": "main", "index": 0},
+          {"node": "Agent: API", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Agent: Recon": {
+      "main": [[{"node": "Aggregate Results", "type": "main", "index": 0}]]
+    },
+    "Agent: Web": {
+      "main": [[{"node": "Aggregate Results", "type": "main", "index": 0}]]
+    },
+    "Agent: Network": {
+      "main": [[{"node": "Aggregate Results", "type": "main", "index": 0}]]
+    },
+    "Agent: Cloud": {
+      "main": [[{"node": "Aggregate Results", "type": "main", "index": 0}]]
+    },
+    "Agent: API": {
+      "main": [[{"node": "Aggregate Results", "type": "main", "index": 0}]]
+    },
+    "Aggregate Results": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-24T19:00:00.000Z",
+  "versionId": "1"
+}

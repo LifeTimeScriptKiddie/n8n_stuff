@@ -1,38 +1,174 @@
-# n8n Recon Hub
+# n8n Autonomous Pentesting Platform
 
-**AI-powered penetration testing and reconnaissance automation platform.** Leverages n8n for workflow automation, Ollama for AI-driven planning, and a comprehensive suite of security tools to automate the entire recon process from target submission to final report generation.
+**Self-learning, AI-powered autonomous penetration testing system with RAG (Retrieval-Augmented Generation) capabilities.** This platform combines traditional penetration testing tools with modern AI/ML for intelligent, adaptive security testing that learns from every scan.
 
-## Architecture
+## 🚀 What's New: Autonomous Agent Architecture
+
+This is a **fully autonomous pentesting system** featuring:
+
+- **🧠 RAG-Powered Intelligence**: Vector database (Chroma) + Ollama embeddings for semantic knowledge retrieval
+- **🤖 Specialized Agents**: Modular agents for web, network, cloud, and API testing
+- **📚 Self-Learning**: Extracts patterns from successful attacks, improves over time
+- **⚡ Semi-Autonomous**: Executes recon/scanning autonomously, requires approval for exploitation
+- **🔄 Continuous Learning**: Ingests CVE feeds, exploit databases, and security research
+- **📊 Analytics Dashboard**: Real-time tool performance metrics and attack pattern success rates
+
+## 🤖 LLM Model Profiles
+
+The platform now supports multiple LLM model profiles for different resource constraints:
+
+- **Minimal** (~2GB): Ultra-lightweight - `llama3.2:1b`, perfect for testing
+- **Efficient** (~5GB): ⭐ **Recommended** - Quantized models for production use
+- **Standard** (~10GB): Balanced performance and quality
+- **Full** (~20GB): Complete model suite with code analysis
+
+Configure via `LLM_MODEL_PROFILE` in `.env`. Use `./manage-models.sh` for easy model management.
+📖 See **[LLM_MODELS_GUIDE.md](LLM_MODELS_GUIDE.md)** for complete documentation.
+
+## Architecture v2.0 (Autonomous)
 
 ```
-+------------------+     +--------------------+     +---------------------+
-|  User / Web UI   |---->|   NGINX (Port 80)  |---->|   n8n Recon Hub     |
-+------------------+     | (Reverse Proxy)    |     | (Workflow Engine)   |
-                         +--------------------+     +----------+----------+
-                                                               |
-                                              +----------------+----------------+
-                                              |                                 |
-                                   +----------v----------+          +-----------v-----------+
-                                   |   Ollama (LLM)      |          |   PostgreSQL (DB)     |
-                                   +---------------------+          +-----------------------+
+┌─────────────────────────────────────────────────────────────────┐
+│                        USER INTERFACES                          │
+│  Web UI (8080) │ n8n Dashboard (5678) │ Approval Dashboard     │
+└────────────────┬────────────────────────────────────────────────┘
+                 │
+┌────────────────▼────────────────────────────────────────────────┐
+│                    AGENT ORCHESTRATOR                           │
+│  • RAG Query (historical context)                              │
+│  • AI Planning (Ollama llama3.2)                               │
+│  • Agent Selection & Coordination                              │
+└─────┬────────┬────────┬────────┬────────┬──────────────────────┘
+      │        │        │        │        │
+┌─────▼──┐ ┌──▼────┐ ┌─▼─────┐ ┌▼──────┐ ┌▼──────┐
+│ Recon  │ │  Web  │ │Network│ │ Cloud │ │  API  │  Specialized
+│ Agent  │ │ Agent │ │ Agent │ │ Agent │ │ Agent │  Agents
+└────┬───┘ └───┬───┘ └───┬───┘ └───┬───┘ └───┬───┘
+     │         │         │         │         │
+     └─────────┴─────────┴─────────┴─────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────────┐
+│                  LEARNING & STORAGE LAYER                       │
+├─────────────────────┬───────────────────┬───────────────────────┤
+│  Chroma Vector DB   │   PostgreSQL      │   MinIO              │
+│  (Embeddings/RAG)   │   (Findings/Logs) │   (Evidence Files)   │
+└─────────────────────┴───────────────────┴───────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────────┐
+│                 INTELLIGENCE SOURCES                            │
+│  ExploitDB │ NVD CVE Feed │ Nuclei Templates │ Security Research│
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Services:**
-- **n8n-recon**: Core automation engine with pre-installed security tools
-- **Ollama**: Local LLM (Llama 3.2) for AI planning and report generation
-- **PostgreSQL**: Database for workflow executions and scan data
-- **NGINX**: Reverse proxy and web interface server
+- **Agent Orchestrator**: Master coordinator using RAG + AI planning
+- **Specialized Agents**: 5 autonomous agents (recon, web, network, cloud, API)
+- **Ollama**: Multi-model LLM stack (llama3.2, mistral, codellama, nomic-embed-text)
+- **Chroma**: Vector database for semantic knowledge retrieval
+- **PostgreSQL**: Structured data (findings, patterns, metrics, decisions)
+- **Redis**: Ephemeral credentials and job queues
+- **MinIO**: Evidence file storage
+
+## 🎯 Consolidated Master Workflows (v3.0)
+
+**NEW:** All 14 workflows consolidated into 4 master workflows for easier management!
+
+### Master Workflows
+
+| Workflow | Purpose | Triggers | Components |
+|----------|---------|----------|------------|
+| **MASTER_01_intelligence_pipeline** | Intelligence & Learning | Multiple schedules | RAG query, embedder (6h), learning (12h), analyzer (2h), feedback (6h), feeds (24h) |
+| **MASTER_02_agent_orchestration** | Agent Coordination | DB polling (30s) + Webhook | Orchestrator + 5 agents (recon, web, network, cloud, API) |
+| **MASTER_03_execution_control** | Approval & Exploitation | Schedule (5m) + Webhook | Approval handler + exploit runner |
+| **MASTER_04_ai_interface** | 🤖 Natural Language AI | Webhook: `/webhook/ai-chat` | Ollama parser + intent router + conversational UI |
+
+### 🚀 Quick Start: Import Only These 4 Files
+
+**Just import these 4 workflows - that's it!**
+
+1. `workflows/MASTER_01_intelligence_pipeline.json`
+2. `workflows/MASTER_02_agent_orchestration.json`
+3. `workflows/MASTER_03_execution_control.json`
+4. `workflows/MASTER_04_ai_interface.json`
+
+**Old workflows** (01-14) are in `workflows/legacy/` for reference only - **DO NOT IMPORT THEM**.
+
+### 🤖 Usage Example: Natural Language (Easiest!)
+
+```bash
+# Option 1: Use the AI Chat Interface (Recommended!)
+open http://localhost:8080/chat.html
+
+# Then just type naturally:
+# "Scan example.com"
+# "Quick test on 10.0.0.1"
+# "Show scan status"
+# "Help"
+```
+
+### 📡 Usage Example: API/Webhook
+
+```bash
+# 1. Create a project
+PROJECT_ID=$(docker exec -it recon_postgres psql -U recon_user -d recon_hub -tAc \
+  "INSERT INTO projects (name, scope) VALUES ('Test', '[\"example.com\"]') RETURNING id;")
+
+# 2. Option A: Natural language API
+curl -X POST http://localhost:5678/webhook/ai-chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Scan scanme.nmap.org"}'
+
+# 2. Option B: Direct webhook (traditional)
+curl -X POST http://localhost:5678/webhook/pentest/v2 \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"target\": \"scanme.nmap.org\",
+    \"project_id\": \"$PROJECT_ID\",
+    \"mode\": \"standard\"
+  }"
+
+# 3. View dashboards
+open http://localhost:8080/chat.html              # AI Chat Interface ⭐ NEW
+open http://localhost:8080/index.html             # Simple Web UI
+open http://localhost:8080/approval-dashboard.html # Approval Queue
+open http://localhost:8080/learning-stats.html    # Learning Metrics
+```
+
+## Database Schema
+
+### RAG & Learning Tables (Phase F)
+
+```sql
+knowledge_vectors       -- Vector embeddings for semantic search
+tool_success_metrics    -- Tool effectiveness tracking
+attack_patterns         -- Learned attack chains
+agent_decisions         -- AI decision audit trail
+learning_feedback       -- User feedback for improvement
+exploit_executions      -- Exploitation attempt tracking
+```
+
+### Analytics Views
+
+```sql
+v_top_performing_tools         -- Best tools by success rate
+v_successful_attack_patterns   -- Proven attack patterns
+v_learning_statistics          -- Overall system learning metrics
+v_pending_approvals            -- Actions awaiting approval
+```
 
 ## Features
 
-### AI Planner Versions
+### API Versions
 
-| Feature | v1 (Basic) | v2 (Advanced) |
-|---------|------------|---------------|
-| Commands | 2-4 | Mode-based (1-6+) |
-| Targets | Single IP/Domain/URL | CIDR, wildcards, multiple, cloud |
-| Tools | Core only | Full toolkit |
-| Modes | N/A | quick/standard/thorough/stealth |
+| Feature | v1 (Basic) | v2 (Enterprise) | v3 (Pivot) | v4 (Cloud) |
+|---------|------------|-----------------|------------|------------|
+| Project ID | No | Yes | Yes | Yes |
+| Rate Limiting | No | Yes | Yes | Yes |
+| Audit Logging | No | Yes | Yes | Yes |
+| SSH Tunnels | No | No | Yes | No |
+| Auto-Pivot | No | No | Yes | No |
+| Cloud Scanning | No | No | No | Yes (Azure) |
+| Scan Modes | N/A | 4 modes | 4 modes | 7 cloud modes |
 
 ### Automatic Tool Installation
 Tools are installed on-demand when the AI requests them. No need to pre-install everything.
@@ -74,7 +210,9 @@ cp .env.example .env
 ### 2. Launch the Stack
 
 ```bash
-docker-compose up --build -d
+./setup.sh
+# Or manually:
+# docker-compose up --build -d
 ```
 
 Build time: ~3-5 minutes
@@ -82,19 +220,33 @@ Build time: ~3-5 minutes
 ### 3. Pull Ollama Model
 
 ```bash
-docker exec recon_ollama ollama pull llama3.2
+docker exec -it ollama ollama pull llama3.2:latest
 ```
 
-### 4. Import & Activate Workflows
+### 4. Import & Activate the 4 Master Workflows
 
 1. Open **http://localhost:5678**
 2. Login with credentials from `.env`
-3. **Workflows** → **Import from File** → `workflows/pentest_router.json`
-4. **Activate** the workflow (toggle switch)
+3. **Workflows** → **Import from File**
+4. Import these 4 files (in order):
+   - ✅ `workflows/MASTER_01_intelligence_pipeline.json`
+   - ✅ `workflows/MASTER_02_agent_orchestration.json`
+   - ✅ `workflows/MASTER_03_execution_control.json`
+   - ✅ `workflows/MASTER_04_ai_interface.json`
+5. **Activate** each workflow (toggle switch to green)
 
-### 5. Access Web Interface
+### 5. Access Interfaces
 
-Open **http://localhost** for the web UI
+```bash
+# AI Chat Interface (Natural Language) ⭐ Recommended!
+open http://localhost:8080/chat.html
+
+# Simple Web UI (Form-based)
+open http://localhost:8080/index.html
+
+# n8n Dashboard
+open http://localhost:5678
+```
 
 ## Usage Examples
 
@@ -158,9 +310,31 @@ Available at **http://localhost**
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /webhook/pentest` | Main router (auto-selects v1/v2) |
-| `POST /webhook/pentest-v2` | Direct v2 advanced scan |
+| `POST /webhook/pentest` | v1 - Legacy (no project) |
+| `POST /webhook/pentest/v2` | v2 - Enterprise (rate limiting, audit) |
+| `POST /webhook/pentest/v3` | v3 - Pivot capable (SSH tunnels) |
+| `POST /webhook/pentest/v4/cloud` | v4 - Azure cloud scanning |
+| `POST /webhook/evidence/upload` | Upload evidence files to MinIO |
 | `POST /webhook/recon-scan` | Multi-phase database-driven scan |
+
+### Enterprise Workflow (v2) - Requires project_id
+
+```bash
+# First create a project
+docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "
+INSERT INTO projects (name, scope)
+VALUES ('My Pentest', '[\"example.com\"]')
+RETURNING id;"
+
+# Then run scan with project_id
+curl -X POST http://localhost/webhook/pentest/v2 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "your-project-uuid-here",
+    "target": "example.com",
+    "mode": "standard"
+  }'
+```
 
 ### Response Format
 ```json
@@ -252,3 +426,103 @@ docker-compose up --build -d
 - Consider adding authentication for production
 - Results may contain sensitive reconnaissance data
 - Keep API keys secure in `.env` file
+
+## Enterprise Features (v2/v3/v4)
+
+### Available Workflows
+
+| Workflow | Purpose |
+|----------|---------|
+| `pentest_router_v2.json` | v2 - Enterprise scan with rate limiting, audit |
+| `pentest_router_v3.json` | v3 - Pivot capable with SSH tunnel support |
+| `pentest_v4_cloud.json` | v4 - Azure cloud security scanning |
+| `pivot_orchestrator.json` | Auto-pivot management on SSH success |
+| `credential_tester.json` | Test credentials (SSH/SMB/FTP), auto-queue pivots |
+| `evidence_ingest.json` | Upload evidence to MinIO, queue for parsing |
+| `nmap_parser.json` | Parse Nmap XML, upsert hosts/ports to database |
+| `daily_housekeeping.json` | Expire old data, generate metrics, cleanup |
+| `notification_sender.json` | Send alerts via Slack or database |
+
+### Database Schema
+
+**Phase A (Core):** projects, hosts, ports, evidence, scan_jobs, rate_limits, audit_log
+**Phase B (Credentials):** secure_credentials, credential_usage, relationships, credential_test_queue
+**Phase C (Findings):** findings, loot, enrichment, notifications, approval_queue
+**Phase D (Pivoting):** ssh_tunnels, pivot_queue, internal_networks, proxy_chains
+**Phase E (Cloud):** azure_tenants, azure_subscriptions, azure_resources, azure_ad_objects, azure_role_assignments, cloud_findings
+
+### Pivot Capability (v3)
+
+```bash
+# Scan through an active SSH tunnel
+curl -X POST http://localhost/webhook/pentest/v3 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "your-project-uuid",
+    "target": "10.0.0.1",
+    "mode": "standard",
+    "tunnel_id": "your-tunnel-uuid"
+  }'
+```
+
+Features:
+- Auto-pivot on SSH credential success
+- Max 4 hops depth
+- Tunnels persist until project ends
+- Full internal recon through SOCKS proxies
+- View tunnels: `SELECT * FROM active_tunnels;`
+
+### Cloud Scanning (v4)
+
+```bash
+# Azure cloud security scan
+curl -X POST http://localhost/webhook/pentest/v4/cloud \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "your-project-uuid",
+    "tenant_id": "azure-tenant-guid",
+    "credential_id": "credential-uuid",
+    "scan_mode": "full-cloud"
+  }'
+```
+
+**Cloud Scan Modes:**
+| Mode | Description |
+|------|-------------|
+| `full-cloud` | Comprehensive scan (all checks) |
+| `aad-enum` | Azure AD enumeration (users, groups, SPs) |
+| `resource-discovery` | Find all Azure resources |
+| `blob-scan` | Storage account scanning |
+| `privilege-audit` | IAM misconfiguration check |
+| `keyvault-access` | Key Vault permissions |
+| `api-abuse` | Graph API testing |
+
+**Cloud Tools:** Azure CLI, ScoutSuite, ROADrecon, msticpy
+
+### Rate Limiting
+
+- Max 3 concurrent scans per project
+- 5-minute cooldown per target
+- 100 credential tests per hour
+
+### MinIO Console
+
+Access at **http://localhost:9001** with credentials from CREDENTIALS.txt
+
+Buckets: `raw-evidence`, `reports`
+
+### Useful Commands
+
+```bash
+# Access MinIO console
+open http://localhost:9001
+
+# Check Redis
+docker exec recon_redis redis-cli ping
+
+# View project summary
+docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "SELECT * FROM project_summary;"
+
+# View recent scans
+docker exec -i recon_postgres psql -U recon_user -d recon_hub -c "SELECT * FROM recent_scan_jobs;"
+```

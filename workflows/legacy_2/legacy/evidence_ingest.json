@@ -1,0 +1,315 @@
+{
+  "name": "Evidence Ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "evidence/upload",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "name": "Upload Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "evidence-upload"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and extract upload metadata\nconst input = $input.first();\nconst body = input.json.body;\nconst headers = input.json.headers;\n\nif (!body.project_id) {\n  throw new Error('project_id is required');\n}\n\nif (!body.file_name) {\n  throw new Error('file_name is required');\n}\n\nif (!body.file_content) {\n  throw new Error('file_content (base64) is required');\n}\n\n// Decode base64 and calculate hash\nconst crypto = require('crypto');\nconst fileBuffer = Buffer.from(body.file_content, 'base64');\nconst fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');\n\n// Determine file type from extension\nconst ext = body.file_name.split('.').pop().toLowerCase();\nconst fileTypes = {\n  'xml': 'nmap_xml',\n  'json': 'json_output',\n  'txt': 'text_output',\n  'log': 'log_file',\n  'pcap': 'packet_capture',\n  'png': 'screenshot',\n  'jpg': 'screenshot'\n};\n\nreturn [{\n  json: {\n    project_id: body.project_id,\n    file_name: body.file_name,\n    file_content: body.file_content,\n    file_hash: fileHash,\n    file_size: fileBuffer.length,\n    file_type: body.file_type || fileTypes[ext] || 'unknown',\n    mime_type: body.mime_type || 'application/octet-stream',\n    source_tool: body.source_tool || 'manual',\n    metadata: body.metadata || {},\n    upload_id: crypto.randomUUID()\n  }\n}];"
+      },
+      "name": "Validate Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, status FROM projects WHERE id = '{{ $json.project_id }}'::uuid AND status = 'active'",
+        "options": {}
+      },
+      "name": "Verify Project",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [640, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Validate Upload').first().json;\nconst project = $input.first().json;\n\nif (!project || !project.id) {\n  throw new Error(`Project not found or inactive: ${input.project_id}`);\n}\n\n// Generate MinIO path\nconst date = new Date();\nconst year = date.getFullYear();\nconst month = String(date.getMonth() + 1).padStart(2, '0');\nconst day = String(date.getDate()).padStart(2, '0');\n\nconst minioPath = `${input.project_id}/${year}/${month}/${day}/${input.upload_id}_${input.file_name}`;\n\nreturn [{\n  json: {\n    ...input,\n    project_name: project.name,\n    minio_bucket: 'raw-evidence',\n    minio_path: minioPath\n  }\n}];"
+      },
+      "name": "Prepare Storage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://minio:9000/{{ $json.minio_bucket }}/{{ $json.minio_path }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "={{ $json.mime_type }}"
+            },
+            {
+              "name": "x-amz-meta-project-id",
+              "value": "={{ $json.project_id }}"
+            },
+            {
+              "name": "x-amz-meta-file-hash",
+              "value": "={{ $json.file_hash }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "options": {}
+      },
+      "name": "Upload to MinIO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO evidence (\n  project_id,\n  minio_bucket,\n  minio_path,\n  file_name,\n  file_hash_sha256,\n  file_size_bytes,\n  file_type,\n  mime_type,\n  parser_status,\n  metadata\n) VALUES (\n  '{{ $json.project_id }}'::uuid,\n  '{{ $json.minio_bucket }}',\n  '{{ $json.minio_path }}',\n  '{{ $json.file_name }}',\n  '{{ $json.file_hash }}',\n  {{ $json.file_size }},\n  '{{ $json.file_type }}',\n  '{{ $json.mime_type }}',\n  'pending',\n  '{{ JSON.stringify($json.metadata) }}'::jsonb\n)\nRETURNING id, created_at",
+        "options": {}
+      },
+      "name": "Save Evidence Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1300, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Queue for parsing based on file type\nconst input = $('Prepare Storage').first().json;\nconst evidence = $input.first().json;\n\nconst parsableTypes = ['nmap_xml', 'json_output', 'nuclei_json'];\nconst needsParsing = parsableTypes.includes(input.file_type);\n\nreturn [{\n  json: {\n    evidence_id: evidence.id,\n    project_id: input.project_id,\n    file_name: input.file_name,\n    file_type: input.file_type,\n    file_hash: input.file_hash,\n    minio_bucket: input.minio_bucket,\n    minio_path: input.minio_path,\n    needs_parsing: needsParsing,\n    created_at: evidence.created_at\n  }\n}];"
+      },
+      "name": "Check Parser",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-parsing",
+              "leftValue": "={{ $json.needs_parsing }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Needs Parsing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1740, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO scan_jobs (\n  project_id,\n  job_type,\n  status,\n  target,\n  metadata\n) VALUES (\n  '{{ $json.project_id }}'::uuid,\n  'parse',\n  'queued',\n  '{{ $json.file_name }}',\n  '{{ JSON.stringify({ evidence_id: $json.evidence_id, file_type: $json.file_type, minio_path: $json.minio_path }) }}'::jsonb\n)\nRETURNING id",
+        "options": {}
+      },
+      "name": "Queue Parse Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1960, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (project_id, action, entity_type, entity_id, details)\nVALUES (\n  '{{ $json.project_id }}'::uuid,\n  'evidence_uploaded',\n  'evidence',\n  '{{ $json.evidence_id }}'::uuid,\n  '{{ JSON.stringify({ file_name: $json.file_name, file_type: $json.file_type, file_hash: $json.file_hash }) }}'\n)",
+        "options": {}
+      },
+      "name": "Audit Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2180, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, evidence_id: $('Check Parser').first().json.evidence_id, file_name: $('Check Parser').first().json.file_name, file_hash: $('Check Parser').first().json.file_hash, queued_for_parsing: $('Check Parser').first().json.needs_parsing, message: 'Evidence uploaded successfully' }) }}",
+        "options": {}
+      },
+      "name": "Return Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2400, 300]
+    }
+  ],
+  "connections": {
+    "Upload Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Upload": {
+      "main": [
+        [
+          {
+            "node": "Verify Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Project": {
+      "main": [
+        [
+          {
+            "node": "Prepare Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Storage": {
+      "main": [
+        [
+          {
+            "node": "Upload to MinIO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to MinIO": {
+      "main": [
+        [
+          {
+            "node": "Save Evidence Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Evidence Record": {
+      "main": [
+        [
+          {
+            "node": "Check Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Parser": {
+      "main": [
+        [
+          {
+            "node": "Needs Parsing?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Parsing?": {
+      "main": [
+        [
+          {
+            "node": "Queue Parse Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Parse Job": {
+      "main": [
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Return Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

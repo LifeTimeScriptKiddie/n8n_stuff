@@ -1,0 +1,230 @@
+{
+  "name": "MASTER: Execution Control",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 5}]
+        }
+      },
+      "name": "Schedule: Approval Check (5min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "schedule-approvals"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "exploit/run",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook: Execute Exploit",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 600],
+      "webhookId": "exploit-runner-master",
+      "id": "webhook-exploit"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get pending approvals\nSELECT * FROM v_pending_approvals \nORDER BY created_at ASC \nLIMIT 20;",
+        "options": {}
+      },
+      "name": "Approval: Get Pending",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "id": "approval-get",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse exploit execution request\nconst body = $input.first().json.body || $input.first().json;\n\nif (!body.approval_id || !body.exploit_type) {\n  throw new Error('approval_id and exploit_type required');\n}\n\nreturn [{\n  json: {\n    approval_id: body.approval_id,\n    exploit_type: body.exploit_type,\n    target: body.target || null,\n    template: body.template || null,\n    options: body.options || {},\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Exploit: Parse Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 600],
+      "id": "exploit-parse"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Has Pending Approvals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "has-pending"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Verify approval exists and is approved\nSELECT * FROM approval_queue \nWHERE id = '{{ $json.approval_id }}' \n  AND status = 'approved';",
+        "options": {}
+      },
+      "name": "Exploit: Verify Approval",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [680, 600],
+      "id": "exploit-verify",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Send approval notification\nINSERT INTO notifications (\n  project_id, \n  notification_type, \n  severity, \n  title, \n  message, \n  metadata\n) \nVALUES (\n  '{{ $json.project_id }}', \n  'approval_required', \n  'warning', \n  'Action Requires Approval', \n  'Agent: {{ $json.agent_type }}\\nDecision: {{ $json.decision_type }}\\nConfidence: {{ $json.confidence_score }}\\n\\nReasoning: {{ $json.reasoning }}', \n  jsonb_build_object(\n    'decision_id', '{{ $json.id }}',\n    'target', '{{ $json.target_info }}',\n    'risk_level', '{{ $json.risk_level }}'\n  )\n)\nRETURNING id;",
+        "options": {}
+      },
+      "name": "Approval: Send Notification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 200],
+      "id": "approval-notify",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "approved"
+            }
+          ]
+        }
+      },
+      "name": "Is Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 600],
+      "id": "is-approved"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build exploit command based on type\nconst parseNode = $('Exploit: Parse Request').first().json;\nconst approvalNode = $input.first().json;\n\nconst exploitType = parseNode.exploit_type;\nconst target = parseNode.target || approvalNode.target_info;\nconst template = parseNode.template;\n\nlet command = '';\n\nswitch (exploitType) {\n  case 'sqlmap':\n    command = `sqlmap -u ${target} --batch --risk=2 --level=2`;\n    break;\n  case 'nuclei':\n    command = template \n      ? `nuclei -u ${target} -t ${template}`\n      : `nuclei -u ${target} -severity critical,high`;\n    break;\n  case 'nmap_vuln':\n    command = `nmap --script vuln ${target}`;\n    break;\n  case 'searchsploit':\n    command = `searchsploit ${target}`;\n    break;\n  default:\n    throw new Error(`Unknown exploit type: ${exploitType}`);\n}\n\nreturn [{\n  json: {\n    command: command,\n    exploit_type: exploitType,\n    target: target,\n    approval_id: parseNode.approval_id,\n    project_id: approvalNode.project_id,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Exploit: Build Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 500],
+      "id": "exploit-build"
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.command }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "name": "Exploit: Execute",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1340, 500],
+      "id": "exploit-execute",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=-- Record exploit execution\nINSERT INTO exploit_executions (\n  project_id,\n  approval_id,\n  exploit_type,\n  target_host,\n  status,\n  command,\n  results,\n  started_at,\n  completed_at\n)\nVALUES (\n  '{{ $('Exploit: Build Command').item.json.project_id }}',\n  '{{ $('Exploit: Build Command').item.json.approval_id }}',\n  '{{ $('Exploit: Build Command').item.json.exploit_type }}',\n  '{{ $('Exploit: Build Command').item.json.target }}',\n  CASE WHEN '{{ $json.exitCode }}' = '0' THEN 'completed' ELSE 'failed' END,\n  '{{ $('Exploit: Build Command').item.json.command }}',\n  jsonb_build_object(\n    'stdout', '{{ $json.stdout }}',\n    'stderr', '{{ $json.stderr }}',\n    'exitCode', {{ $json.exitCode }}\n  ),\n  NOW() - INTERVAL '15 minutes',\n  NOW()\n)\nRETURNING id, status;",
+        "options": {}
+      },
+      "name": "Exploit: Record Execution",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1560, 500],
+      "id": "exploit-record",
+      "credentials": {
+        "postgres": {"id": "1", "name": "PostgreSQL - Recon Hub"}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log approval check completion\nconst approvals = $input.all();\nconst count = approvals.length;\n\nreturn [{\n  json: {\n    component: 'approval_check',\n    pending_count: count,\n    notifications_sent: count,\n    timestamp: new Date().toISOString(),\n    status: 'completed'\n  }\n}];"
+      },
+      "name": "Approval: Log Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200],
+      "id": "approval-complete"
+    },
+    {
+      "parameters": {
+        "mode": "respondToWebhook",
+        "respondWith": "json",
+        "responseBody": "={{ { \n  success: true, \n  execution_id: $json.id || 'N/A', \n  status: $json.status || 'unknown',\n  component: 'exploit_execution'\n} }}"
+      },
+      "name": "Exploit: Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 600],
+      "id": "exploit-response"
+    }
+  ],
+  "connections": {
+    "Schedule: Approval Check (5min)": {
+      "main": [[{"node": "Approval: Get Pending", "type": "main", "index": 0}]]
+    },
+    "Webhook: Execute Exploit": {
+      "main": [[{"node": "Exploit: Parse Request", "type": "main", "index": 0}]]
+    },
+    "Approval: Get Pending": {
+      "main": [[{"node": "Has Pending Approvals?", "type": "main", "index": 0}]]
+    },
+    "Exploit: Parse Request": {
+      "main": [[{"node": "Exploit: Verify Approval", "type": "main", "index": 0}]]
+    },
+    "Has Pending Approvals?": {
+      "main": [[{"node": "Approval: Send Notification", "type": "main", "index": 0}]]
+    },
+    "Exploit: Verify Approval": {
+      "main": [[{"node": "Is Approved?", "type": "main", "index": 0}]]
+    },
+    "Approval: Send Notification": {
+      "main": [[{"node": "Approval: Log Completion", "type": "main", "index": 0}]]
+    },
+    "Is Approved?": {
+      "main": [[{"node": "Exploit: Build Command", "type": "main", "index": 0}]]
+    },
+    "Exploit: Build Command": {
+      "main": [[{"node": "Exploit: Execute", "type": "main", "index": 0}]]
+    },
+    "Exploit: Execute": {
+      "main": [[{"node": "Exploit: Record Execution", "type": "main", "index": 0}]]
+    },
+    "Exploit: Record Execution": {
+      "main": [[{"node": "Exploit: Webhook Response", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-24T19:00:00.000Z",
+  "versionId": "1"
+}

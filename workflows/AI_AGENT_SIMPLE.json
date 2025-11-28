@@ -1,0 +1,260 @@
+{
+  "name": "AI Agent Interface (Simple)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-agent",
+        "responseMode": "responseNode",
+        "responseNode": "webhook-response",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "ai-agent-simple",
+      "id": "webhook-start"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract input\nconst body = $input.first().json.body || $input.first().json;\nconst message = body.message || '';\nconst sessionId = body.session_id || `session_${Date.now()}`;\n\nreturn {\n  json: {\n    message: message.trim(),\n    session_id: sessionId,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "name": "Extract Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "id": "extract-input"
+    },
+    {
+      "parameters": {
+        "url": "http://chroma:8000/api/v1/collections/pentest_knowledge/query",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"query_texts\": [$json.message], \"n_results\": 3 } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "RAG Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "id": "rag-query",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build AI Agent prompt\nconst input = $input.first().json;\nconst ragData = input.documents ? input.documents[0] : [];\nconst userMessage = $('Extract Input').first().json.message;\n\nconst ragContext = ragData.length > 0 ? \n  ragData.slice(0, 3).map((doc, i) => `${i+1}. ${doc}`).join('\\n') : \n  'No historical context available.';\n\nconst systemPrompt = `You are an elite AI Pentesting Agent.\n\nCapabilities:\n- Analyze targets and recommend attack strategies\n- Create multi-step penetration testing plans\n- Select appropriate tools (subfinder, nuclei, nmap, httpx, ffuf, katana, sqlmap, hydra)\n- Provide actionable technical guidance\n\nResponse Format (JSON only):\n{\n  \"analysis\": \"brief analysis\",\n  \"action\": \"scan\" | \"plan\" | \"status\" | \"help\",\n  \"target\": \"target if applicable\",\n  \"plan\": [\n    {\"phase\": \"name\", \"tools\": [\"tool1\"], \"description\": \"what this does\"}\n  ],\n  \"confidence\": 0.0-1.0,\n  \"reasoning\": \"explain decision\"\n}\n\nKnowledge Context:\n${ragContext}\n\nInstructions:\n- Be concise and technical\n- Always consider authorization\n- If user asks to scan, create a plan first\n- Recommend standard/thorough modes for unknown targets`;\n\nreturn {\n  json: {\n    system_prompt: systemPrompt,\n    user_message: userMessage\n  }\n};"
+      },
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "id": "build-prompt"
+    },
+    {
+      "parameters": {
+        "url": "http://ollama:11434/api/chat",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"model\": \"llama3.2:1b\",\n  \"messages\": [\n    {\"role\": \"system\", \"content\": $json.system_prompt},\n    {\"role\": \"user\", \"content\": $json.user_message}\n  ],\n  \"stream\": false,\n  \"format\": \"json\",\n  \"options\": {\"temperature\": 0.3, \"top_p\": 0.9}\n} }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "AI Agent Reasoning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "id": "ai-reasoning"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response\nconst input = $input.first().json;\nlet agentResponse;\n\ntry {\n  const content = input.message?.content || '{}';\n  agentResponse = JSON.parse(content);\n} catch (e) {\n  agentResponse = {\n    analysis: \"Error parsing response\",\n    action: \"help\",\n    confidence: 0.1,\n    reasoning: \"JSON parsing failed\"\n  };\n}\n\n// Validate\nif (!agentResponse.action) agentResponse.action = 'help';\nif (!Array.isArray(agentResponse.plan)) agentResponse.plan = [];\n\nreturn {\n  json: {\n    agent_response: agentResponse,\n    session_id: $('Extract Input').first().json.session_id\n  }\n};"
+      },
+      "name": "Parse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "id": "parse-response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.agent_response.action }}",
+              "operation": "equals",
+              "value2": "scan"
+            }
+          ]
+        }
+      },
+      "name": "Is Scan?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 300],
+      "id": "check-scan"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5678/webhook/pentest/v2",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"target\": $('Parse Response').first().json.agent_response.target,\n  \"project_id\": \"69bcc86a-a0dd-4b64-87a2-4eb820fd0fb4\",\n  \"mode\": \"standard\",\n  \"source\": \"ai-agent\"\n} }}",
+        "options": {}
+      },
+      "name": "Start Scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 200],
+      "id": "start-scan"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format response\nconst agentData = $('Parse Response').first().json;\nconst scanResult = $input.first()?.json;\n\nlet response = '';\n\n// Check if scan was executed\nif (scanResult && scanResult.success !== undefined) {\n  if (scanResult.success) {\n    response = `🤖 AI Agent Analysis:\\n${agentData.agent_response.analysis}\\n\\n✅ Scan Started!\\n🎯 Target: ${scanResult.target}\\n📋 Job ID: ${scanResult.scan_job_id}\\n\\n💡 Reasoning: ${agentData.agent_response.reasoning}`;\n  } else {\n    response = `❌ Scan failed: ${scanResult.error || 'Unknown error'}`;\n  }\n} else {\n  // Return plan\n  const agent = agentData.agent_response;\n  response = `🤖 AI Agent\\n\\n📋 ${agent.analysis}\\n\\n`;\n  \n  if (agent.plan && agent.plan.length > 0) {\n    response += '🎯 Proposed Plan:\\n\\n';\n    agent.plan.forEach((p, i) => {\n      response += `${i+1}. ${p.phase}\\n   Tools: ${(p.tools || []).join(', ')}\\n   → ${p.description}\\n\\n`;\n    });\n  }\n  \n  response += `💡 ${agent.reasoning}\\n`;\n  response += `📊 Confidence: ${Math.round((agent.confidence || 0) * 100)}%`;\n}\n\nreturn {\n  json: {\n    success: true,\n    response: response,\n    agent_response: agentData.agent_response,\n    session_id: agentData.session_id\n  }\n};"
+      },
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300],
+      "id": "format-output"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2220, 300],
+      "id": "webhook-response"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Input": {
+      "main": [
+        [
+          {
+            "node": "RAG Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG Query": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Agent Reasoning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent Reasoning": {
+      "main": [
+        [
+          {
+            "node": "Parse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Response": {
+      "main": [
+        [
+          {
+            "node": "Is Scan?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Scan?": {
+      "main": [
+        [
+          {
+            "node": "Start Scan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Scan": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-25T01:00:00.000Z",
+  "versionId": "1.0"
+}

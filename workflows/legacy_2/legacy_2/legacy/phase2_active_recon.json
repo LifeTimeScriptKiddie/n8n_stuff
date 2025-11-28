@@ -1,0 +1,726 @@
+{
+  "name": "Phase 2: Active Reconnaissance",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "phase2-active-recon",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook: Start Phase 2",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 400],
+      "webhookId": "phase2-active-recon"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT rs.*, sd.stealth_level, sd.rate_limit_per_sec, sd.max_concurrent_scans\nFROM recon_sessions rs\nJOIN scope_definitions sd ON rs.scope_file = sd.scope_name\nWHERE rs.session_id = '{{ $json.body.session_id }}'\nAND rs.status = 'phase1_completed'",
+        "options": {}
+      },
+      "id": "load-session",
+      "name": "Load Session Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.session_id }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "validate-session",
+      "name": "Validate Session Ready",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"error\": \"Session not ready for Phase 2\", \"session_id\": $('Webhook: Start Phase 2').item.json.body.session_id} }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "error-session-not-ready",
+      "name": "Error: Session Not Ready",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 550]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE recon_sessions SET status = 'phase2_started', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}'",
+        "options": {}
+      },
+      "id": "update-session-phase2",
+      "name": "Update Session: Phase 2 Started",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [900, 250],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}',\n  'phase2',\n  'active_recon_started',\n  '{\"start_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "checkpoint-phase2-start",
+      "name": "Checkpoint: Phase 2 Start",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1120, 250],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT DISTINCT subdomain FROM subdomain_intel WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}' ORDER BY subdomain",
+        "options": {}
+      },
+      "id": "load-subdomains",
+      "name": "Load Discovered Subdomains",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1340, 250],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create subdomain list file for httpx\nconst subdomains = $input.all().map(item => item.json.subdomain);\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst filePath = `/tmp/subdomains_${sessionId}.txt`;\n\nconst fs = require('fs');\nfs.writeFileSync(filePath, subdomains.join('\\n'));\n\nconsole.log(`Created subdomain list with ${subdomains.length} entries at ${filePath}`);\n\nreturn [{\n  json: {\n    subdomain_file: filePath,\n    subdomain_count: subdomains.length,\n    session_id: sessionId\n  }\n}];"
+      },
+      "id": "create-subdomain-file",
+      "name": "Create Subdomain List File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 250]
+    },
+    {
+      "parameters": {
+        "command": "httpx -l {{ $json.subdomain_file }} -silent -json -status-code -title -tech-detect -content-length -web-server -ip -cname -cdn -probe -threads 50 -rate-limit {{ $('Load Session Details').item.json.rate_limit_per_sec }} -o /tmp/httpx_{{ $json.body.session_id }}.json && cat /tmp/httpx_{{ $json.body.session_id }}.json"
+      },
+      "id": "httpx-probe",
+      "name": "httpx: HTTP/HTTPS Probing",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1780, 150],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "command": "naabu -l {{ $json.subdomain_file }} -silent -json -top-ports 1000 -rate {{ $('Load Session Details').item.json.rate_limit_per_sec }}00 -o /tmp/naabu_{{ $json.body.session_id }}.json && cat /tmp/naabu_{{ $json.body.session_id }}.json"
+      },
+      "id": "naabu-portscan",
+      "name": "naabu: Fast Port Scanning",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1780, 350],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse httpx JSON output line by line\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst httpxOutput = $input.first().json.stdout || '';\n\nconst results = [];\nconst lines = httpxOutput.split('\\n');\n\nlines.forEach(line => {\n  if (!line.trim()) return;\n  \n  try {\n    const data = JSON.parse(line);\n    \n    results.push({\n      session_id: sessionId,\n      host: data.host || data.url,\n      url: data.url,\n      status_code: data.status_code || data['status-code'],\n      title: data.title,\n      server: data['web-server'] || data.webserver,\n      content_length: data['content-length'],\n      technologies: data.tech || data.technologies || [],\n      ip: data.ip,\n      cname: data.cname,\n      cdn: data.cdn,\n      scheme: data.scheme,\n      port: data.port,\n      response_time: data['response-time'] || null,\n      discovered_at: new Date().toISOString()\n    });\n  } catch (e) {\n    console.log('Failed to parse httpx line:', line.substring(0, 100));\n  }\n});\n\nconsole.log(`Parsed ${results.length} live HTTP services`);\nreturn results.map(item => ({json: item}));"
+      },
+      "id": "parse-httpx",
+      "name": "Parse httpx Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 150]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO http_services (session_id, host, url, status_code, title, server, content_length, technologies, ip, cname, cdn, scheme, port, response_time, discovered_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.url }}',\n  {{ $json.status_code }},\n  '{{ $json.title }}',\n  '{{ $json.server }}',\n  {{ $json.content_length }},\n  '{{ JSON.stringify($json.technologies) }}'::jsonb,\n  '{{ $json.ip }}',\n  '{{ $json.cname }}',\n  '{{ $json.cdn }}',\n  '{{ $json.scheme }}',\n  {{ $json.port }},\n  {{ $json.response_time }},\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, url) DO UPDATE SET\n  status_code = EXCLUDED.status_code,\n  title = EXCLUDED.title,\n  updated_at = NOW()",
+        "options": {}
+      },
+      "id": "store-http-services",
+      "name": "Store HTTP Services",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2220, 150],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse naabu JSON output line by line\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst naabuOutput = $input.first().json.stdout || '';\n\nconst results = [];\nconst lines = naabuOutput.split('\\n');\n\nlines.forEach(line => {\n  if (!line.trim()) return;\n  \n  try {\n    const data = JSON.parse(line);\n    \n    results.push({\n      session_id: sessionId,\n      host: data.host || data.ip,\n      ip: data.ip,\n      port: data.port,\n      protocol: data.protocol || 'tcp',\n      discovered_at: new Date().toISOString()\n    });\n  } catch (e) {\n    console.log('Failed to parse naabu line:', line.substring(0, 100));\n  }\n});\n\nconsole.log(`Parsed ${results.length} open ports`);\nreturn results.map(item => ({json: item}));"
+      },
+      "id": "parse-naabu",
+      "name": "Parse naabu Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 350]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO port_scan_results (session_id, host, ip, port, protocol, discovered_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.host }}',\n  '{{ $json.ip }}',\n  {{ $json.port }},\n  '{{ $json.protocol }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, host, port) DO NOTHING",
+        "options": {}
+      },
+      "id": "store-port-results",
+      "name": "Store Port Scan Results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2220, 350],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT DISTINCT url FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}' AND status_code BETWEEN 200 AND 399 LIMIT 100",
+        "options": {}
+      },
+      "id": "load-live-urls",
+      "name": "Load Live HTTP URLs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2440, 150],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create URL list file for gowitness\nconst urls = $input.all().map(item => item.json.url);\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst urlFile = `/tmp/urls_${sessionId}.txt`;\nconst screenshotDir = `/tmp/screenshots_${sessionId}`;\n\nconst fs = require('fs');\nfs.writeFileSync(urlFile, urls.join('\\n'));\n\n// Create screenshot directory\nconst { execSync } = require('child_process');\ntry {\n  execSync(`mkdir -p ${screenshotDir}`);\n} catch (e) {\n  console.log('Failed to create screenshot directory:', e.message);\n}\n\nconsole.log(`Created URL list with ${urls.length} entries`);\n\nreturn [{\n  json: {\n    url_file: urlFile,\n    screenshot_dir: screenshotDir,\n    url_count: urls.length,\n    session_id: sessionId\n  }\n}];"
+      },
+      "id": "create-url-file",
+      "name": "Create URL List for Screenshots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 150]
+    },
+    {
+      "parameters": {
+        "command": "gowitness file -f {{ $json.url_file }} --screenshot-path {{ $json.screenshot_dir }} --chrome-path /usr/bin/chromium --disable-logging --delay 2 --timeout 30 && ls -la {{ $json.screenshot_dir }}"
+      },
+      "id": "gowitness-screenshot",
+      "name": "gowitness: Capture Screenshots",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2880, 150],
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Record screenshot capture results\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst screenshotDir = $('Create URL List for Screenshots').item.json.screenshot_dir;\nconst output = $input.first().json.stdout || '';\n\n// Count screenshots captured\nconst lines = output.split('\\n');\nconst screenshotFiles = lines.filter(line => line.includes('.png'));\n\nconsole.log(`Captured ${screenshotFiles.length} screenshots`);\n\nreturn [{\n  json: {\n    session_id: sessionId,\n    screenshot_dir: screenshotDir,\n    screenshot_count: screenshotFiles.length,\n    captured_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-screenshots",
+      "name": "Parse Screenshot Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 150]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO screenshots (session_id, screenshot_path, screenshot_count, captured_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.screenshot_dir }}',\n  {{ $json.screenshot_count }},\n  '{{ $json.captured_at }}',\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "store-screenshot-info",
+      "name": "Store Screenshot Info",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3320, 150],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "katana -u {{ $('Create URL List for Screenshots').item.json.url_file }} -jc -silent -known-files all -automatic-form-fill -field-scope {{ $('Load Session Details').item.json.scope_name }} -rate-limit {{ $('Load Session Details').item.json.rate_limit_per_sec }} -o /tmp/katana_{{ $('Webhook: Start Phase 2').item.json.body.session_id }}.txt && cat /tmp/katana_{{ $('Webhook: Start Phase 2').item.json.body.session_id }}.txt | head -1000"
+      },
+      "id": "katana-crawl",
+      "name": "katana: JavaScript & Endpoint Discovery",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2880, 350],
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse katana crawling output\nconst sessionId = $('Webhook: Start Phase 2').item.json.body.session_id;\nconst katanaOutput = $input.first().json.stdout || '';\n\nconst endpoints = new Set();\nconst jsFiles = new Set();\n\nkatanaOutput.split('\\n').forEach(line => {\n  const url = line.trim();\n  if (!url) return;\n  \n  if (url.endsWith('.js')) {\n    jsFiles.add(url);\n  } else {\n    endpoints.add(url);\n  }\n});\n\nconsole.log(`Discovered ${endpoints.size} endpoints and ${jsFiles.size} JS files`);\n\nconst results = [];\n\nendpoints.forEach(endpoint => {\n  results.push({\n    session_id: sessionId,\n    endpoint: endpoint,\n    method: 'GET',\n    source: 'katana',\n    discovered_at: new Date().toISOString()\n  });\n});\n\nreturn results.slice(0, 500).map(item => ({json: item}));"
+      },
+      "id": "parse-katana",
+      "name": "Parse katana Endpoints",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 350]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO api_endpoints (session_id, endpoint, method, source, discovered_at, created_at)\nVALUES (\n  '{{ $json.body.session_id }}',\n  '{{ $json.endpoint }}',\n  '{{ $json.method }}',\n  '{{ $json.source }}',\n  '{{ $json.discovered_at }}',\n  NOW()\n)\nON CONFLICT (session_id, endpoint) DO NOTHING",
+        "options": {}
+      },
+      "id": "store-endpoints",
+      "name": "Store Discovered Endpoints",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3320, 350],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      },
+      "id": "wait-all-active",
+      "name": "Wait for All Active Recon",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [3540, 250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE recon_sessions SET status = 'phase2_completed', updated_at = NOW() WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}'",
+        "options": {}
+      },
+      "id": "update-session-phase2-complete",
+      "name": "Update Session: Phase 2 Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3760, 250],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO scan_checkpoints (session_id, phase, checkpoint_name, checkpoint_data, created_at)\nVALUES (\n  '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}',\n  'phase2',\n  'active_recon_completed',\n  '{\"end_time\": \"{{ $now }}\"}'::jsonb,\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "checkpoint-phase2-complete",
+      "name": "Checkpoint: Phase 2 Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3980, 250],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  (SELECT COUNT(*) FROM http_services WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}') as http_count,\n  (SELECT COUNT(*) FROM port_scan_results WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}') as port_count,\n  (SELECT COUNT(*) FROM api_endpoints WHERE session_id = '{{ $('Webhook: Start Phase 2').item.json.body.session_id }}') as endpoint_count",
+        "options": {}
+      },
+      "id": "count-results",
+      "name": "Count Phase 2 Results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [4200, 250],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-recon:5678/webhook/phase3-vuln-assessment",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"session_id\": $('Webhook: Start Phase 2').item.json.body.session_id, \"target\": $('Load Session Details').item.json.target, \"http_count\": $('Count Phase 2 Results').item.json.http_count, \"port_count\": $('Count Phase 2 Results').item.json.port_count, \"source\": \"phase2\" } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-phase3",
+      "name": "Trigger Phase 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4420, 250],
+      "notes": "Starts Phase 3: Vulnerability Assessment after active recon completes",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"phase2_completed\",\n  \"session_id\": $('Webhook: Start Phase 2').item.json.body.session_id,\n  \"http_services\": $('Count Phase 2 Results').item.json.http_count,\n  \"open_ports\": $('Count Phase 2 Results').item.json.port_count,\n  \"endpoints\": $('Count Phase 2 Results').item.json.endpoint_count,\n  \"phase3_triggered\": $('Trigger Phase 3').item.json.statusCode === 200,\n  \"message\": \"Active reconnaissance completed successfully\"\n} }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond: Phase 2 Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [4640, 250]
+    }
+  ],
+  "connections": {
+    "Webhook: Start Phase 2": {
+      "main": [
+        [
+          {
+            "node": "Load Session Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Session Details": {
+      "main": [
+        [
+          {
+            "node": "Validate Session Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Session Ready": {
+      "main": [
+        [
+          {
+            "node": "Update Session: Phase 2 Started",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Session Not Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Session: Phase 2 Started": {
+      "main": [
+        [
+          {
+            "node": "Checkpoint: Phase 2 Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checkpoint: Phase 2 Start": {
+      "main": [
+        [
+          {
+            "node": "Load Discovered Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Discovered Subdomains": {
+      "main": [
+        [
+          {
+            "node": "Create Subdomain List File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Subdomain List File": {
+      "main": [
+        [
+          {
+            "node": "httpx: HTTP/HTTPS Probing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "naabu: Fast Port Scanning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "httpx: HTTP/HTTPS Probing": {
+      "main": [
+        [
+          {
+            "node": "Parse httpx Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse httpx Results": {
+      "main": [
+        [
+          {
+            "node": "Store HTTP Services",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store HTTP Services": {
+      "main": [
+        [
+          {
+            "node": "Load Live HTTP URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "naabu: Fast Port Scanning": {
+      "main": [
+        [
+          {
+            "node": "Parse naabu Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse naabu Results": {
+      "main": [
+        [
+          {
+            "node": "Store Port Scan Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Port Scan Results": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Active Recon",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Load Live HTTP URLs": {
+      "main": [
+        [
+          {
+            "node": "Create URL List for Screenshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create URL List for Screenshots": {
+      "main": [
+        [
+          {
+            "node": "gowitness: Capture Screenshots",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "katana: JavaScript & Endpoint Discovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gowitness: Capture Screenshots": {
+      "main": [
+        [
+          {
+            "node": "Parse Screenshot Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Screenshot Results": {
+      "main": [
+        [
+          {
+            "node": "Store Screenshot Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Screenshot Info": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Active Recon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "katana: JavaScript & Endpoint Discovery": {
+      "main": [
+        [
+          {
+            "node": "Parse katana Endpoints",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse katana Endpoints": {
+      "main": [
+        [
+          {
+            "node": "Store Discovered Endpoints",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Discovered Endpoints": {
+      "main": [
+        [
+          {
+            "node": "Wait for All Active Recon",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Wait for All Active Recon": {
+      "main": [
+        [
+          {
+            "node": "Update Session: Phase 2 Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Session: Phase 2 Complete": {
+      "main": [
+        [
+          {
+            "node": "Checkpoint: Phase 2 Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checkpoint: Phase 2 Complete": {
+      "main": [
+        [
+          {
+            "node": "Count Phase 2 Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Phase 2 Results": {
+      "main": [
+        [
+          {
+            "node": "Trigger Phase 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Phase 3": {
+      "main": [
+        [
+          {
+            "node": "Respond: Phase 2 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "pinData": {},
+  "versionId": "1"
+}
