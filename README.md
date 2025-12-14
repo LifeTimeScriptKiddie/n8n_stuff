@@ -12,6 +12,7 @@ This is a **fully autonomous pentesting system** featuring:
 - **⚡ Semi-Autonomous**: Executes recon/scanning autonomously, requires approval for exploitation
 - **🔄 Continuous Learning**: Ingests CVE feeds, exploit databases, and security research
 - **📊 Analytics Dashboard**: Real-time tool performance metrics and attack pattern success rates
+- **🔌 Claude Desktop Integration**: Connect Claude via MCP for AI-assisted workflow management
 
 ## 🤖 LLM Model Profiles
 
@@ -419,6 +420,51 @@ docker exec -it recon_postgres psql -U recon_user -d recon_hub
 docker-compose up --build -d
 ```
 
+## Claude Desktop Integration (Optional)
+
+Connect Claude Desktop to your n8n instance via the Model Context Protocol (MCP) for AI-assisted workflow management.
+
+### Benefits
+- Ask Claude to list, analyze, and debug your workflows
+- Build new workflows using natural language
+- Query workflow executions and troubleshoot issues
+- Get AI-powered suggestions for workflow optimization
+
+### Quick Setup
+
+1. **Generate n8n API Key**
+   - Open http://localhost:5678
+   - Settings → API → Create API Key
+   - Copy the generated key
+
+2. **Configure Claude Desktop**
+   ```json
+   {
+     "mcpServers": {
+       "n8n": {
+         "command": "npx",
+         "args": ["-y", "n8n-mcp"],
+         "env": {
+           "MCP_MODE": "stdio",
+           "LOG_LEVEL": "error",
+           "DISABLE_CONSOLE_OUTPUT": "true",
+           "N8N_API_URL": "http://localhost:5678",
+           "N8N_API_KEY": "your_api_key_here"
+         }
+       }
+     }
+   }
+   ```
+
+   Config file location:
+   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+   - **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+3. **Restart Claude Desktop** (Cmd+Q then reopen)
+
+📖 **Full guide**: See [CLAUDE_DESKTOP_N8N_MCP_SETUP.md](CLAUDE_DESKTOP_N8N_MCP_SETUP.md)
+
 ## Security Notice
 
 - Only use against **authorized targets**
@@ -426,6 +472,7 @@ docker-compose up --build -d
 - Consider adding authentication for production
 - Results may contain sensitive reconnaissance data
 - Keep API keys secure in `.env` file
+- **MCP Security**: Never commit `claude_desktop_config.json` with API keys to version control
 
 ## Enterprise Features (v2/v3/v4)
 

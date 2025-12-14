@@ -306,10 +306,60 @@ docker logs -f recon_postgres
 
 ---
 
+## 🔌 Optional: Connect Claude Desktop
+
+Integrate Claude Desktop with your n8n instance for AI-assisted workflow management.
+
+### Quick Setup (5 minutes)
+
+1. **Generate API Key in n8n**
+   - Visit http://localhost:5678
+   - Settings → API → Create API Key
+   - Copy the key
+
+2. **Add to Claude Desktop config**
+
+   Edit: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+
+   ```json
+   {
+     "mcpServers": {
+       "n8n": {
+         "command": "npx",
+         "args": ["-y", "n8n-mcp"],
+         "env": {
+           "MCP_MODE": "stdio",
+           "LOG_LEVEL": "error",
+           "DISABLE_CONSOLE_OUTPUT": "true",
+           "N8N_API_URL": "http://localhost:5678",
+           "N8N_API_KEY": "paste_your_api_key_here"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Restart Claude Desktop**
+   - Quit completely (Cmd+Q)
+   - Reopen
+   - Look for MCP icon (🔌) in chat
+
+**What you can do:**
+- "List my n8n workflows"
+- "Debug the agent orchestrator workflow"
+- "Create a workflow to monitor SSL certificates"
+- "Show recent workflow executions"
+
+📖 **Detailed guide**: [CLAUDE_DESKTOP_N8N_MCP_SETUP.md](CLAUDE_DESKTOP_N8N_MCP_SETUP.md)
+
+---
+
 ## 📚 Learn More
 
 - **README.md** - Full architecture documentation
-- **WORKFLOWS.md** - Detailed workflow explanations (coming soon)
+- **CLAUDE_DESKTOP_N8N_MCP_SETUP.md** - MCP integration guide
+- **LLM_MODELS_GUIDE.md** - Model selection and management
+- **AI_AGENT_GUIDE.md** - Autonomous agent system guide
 - **Database Schema** - Check migrations/ directory
 - **n8n Docs** - https://docs.n8n.io
 

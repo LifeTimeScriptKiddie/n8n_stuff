@@ -1,7 +1,8 @@
 # Connecting Claude Desktop to n8n via MCP Server
 
 **Created:** 2025-12-13
-**Purpose:** Enable Claude Desktop to interact with your local n8n_recon_hub instance through the Model Context Protocol (MCP)
+**Updated:** 2025-12-14
+**Purpose:** Enable Claude Desktop to interact with your n8n instance through the Model Context Protocol (MCP)
 
 ---
 
@@ -19,31 +20,34 @@ This guide explains how to connect Claude Desktop to your locally-running n8n in
 
 ```
 ┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
-│ Claude Desktop  │  MCP    │  n8n-mcp Server  │  HTTP   │  n8n_recon_hub  │
-│   (Host Mac)    │ ◄────►  │   (via npx)      │ ◄────►  │   (Docker)      │
+│ Claude Desktop  │  MCP    │  n8n-mcp Server  │  HTTP   │   n8n Instance  │
+│  (Your Computer)│ ◄────►  │   (via npx)      │ ◄────►  │ (Docker/Local)  │
 └─────────────────┘  stdio  └──────────────────┘  API    └─────────────────┘
                                                   :5678
 ```
 
 **Why this architecture:**
-- **n8n runs in Docker**: Your existing `n8n_recon_hub` container exposes port 5678 to localhost
-- **MCP server runs on host**: The `n8n-mcp` package runs via `npx` on your Mac, not in Docker
-- **Communication**: MCP server connects to n8n's REST API at `http://localhost:5678`
+- **n8n can run anywhere**: Docker, local install, cloud - doesn't matter as long as it's accessible
+- **MCP server runs on your computer**: The `n8n-mcp` package runs via `npx` on your machine, not in Docker
+- **Communication**: MCP server connects to n8n's REST API (typically `http://localhost:5678` for local setups)
 - **Claude Desktop**: Communicates with MCP server via stdio (standard input/output)
 
 ---
 
 ## Prerequisites
 
-✅ **Already completed:**
-- n8n running in Docker at `http://localhost:5678`
-- n8n container name: `n8n_recon_hub`
-- Docker port mapping: `0.0.0.0:5678:5678`
-
 ✅ **Required:**
-- Claude Desktop installed on macOS
-- Node.js/npm installed (for npx)
-- n8n API key generated
+- n8n instance running and accessible (Docker, local, or cloud)
+- n8n accessible at a URL (e.g., `http://localhost:5678` or your domain)
+- Claude Desktop installed (macOS, Windows, or Linux)
+- Node.js/npm installed on your computer (for npx)
+- n8n API key (to be generated in Step 1)
+
+**Common n8n setups this works with:**
+- n8n in Docker with port exposed to localhost
+- n8n installed locally via npm
+- n8n cloud instance (use your cloud URL instead of localhost)
+- Self-hosted n8n with domain name
 
 ---
 
@@ -138,7 +142,7 @@ The official `@n8n/mcp-server` package **does not exist**. There are several com
 ```json
 {
   "mcpServers": {
-    "n8n_recon_hub": {
+    "n8n": {
       "command": "npx",
       "args": [
         "-y",
@@ -156,11 +160,16 @@ The official `@n8n/mcp-server` package **does not exist**. There are several com
 }
 ```
 
+**For cloud/remote n8n instances**, change the URL:
+```json
+"N8N_API_URL": "https://your-n8n-domain.com"
+```
+
 ### Configuration Explained:
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| `"n8n_recon_hub"` | Server identifier | Any name you want; this is how Claude identifies your n8n instance |
+| `"n8n"` | Server identifier | Any name you want; this is how Claude identifies your n8n instance |
 | `"command": "npx"` | Package runner | npx downloads and runs npm packages on-demand without global installation |
 | `"-y"` | Auto-confirm | Automatically confirms npx prompts (non-interactive mode) |
 | `"n8n-mcp"` | Package name | The actual npm package to run |
@@ -170,21 +179,28 @@ The official `@n8n/mcp-server` package **does not exist**. There are several com
 | `"N8N_API_URL"` | Your n8n URL | Use `localhost:5678` because MCP runs on host, not in Docker |
 | `"N8N_API_KEY"` | Your API key | Authentication token from Step 1 |
 
-### Why `http://localhost:5678` and not Docker network addresses:
+### Choosing the Right N8N_API_URL:
 
-**✅ Correct:** `http://localhost:5678`
-- MCP server runs on your Mac (via npx)
-- Docker exposes n8n's port 5678 to the host at localhost:5678
-- Host-to-host communication
+**For local n8n (Docker or npm):**
+```json
+"N8N_API_URL": "http://localhost:5678"
+```
+- MCP server runs on your computer (via npx)
+- Docker exposes n8n's port to localhost
+- Local n8n installations also use localhost
 
-**❌ Wrong:** `http://n8n-recon:5678`
-- This is the Docker internal network address
-- Only works for container-to-container communication
-- MCP server is NOT running in a container
+**For cloud/remote n8n:**
+```json
+"N8N_API_URL": "https://your-n8n-instance.com"
+```
+- Use your n8n cloud URL
+- Include `https://` if using SSL/TLS
 
-**❌ Wrong:** `http://host.docker.internal:5678`
-- Only needed if MCP server was running INSIDE a Docker container
-- Our MCP server runs directly on the Mac
+**Common mistakes:**
+- ❌ Using Docker container names (e.g., `http://n8n-recon:5678`) - only works inside Docker network
+- ❌ Using `http://host.docker.internal:5678` - only needed if MCP was running IN a container (it's not)
+- ❌ Forgetting the port number (`:5678`)
+- ❌ Using `http://` for cloud instances that require `https://`
 
 ---
 
@@ -213,7 +229,7 @@ Claude Desktop only loads MCP server configurations at startup. Changes to `clau
 ### In Claude Desktop Settings:
 
 1. Open **Settings** → **Developer** → **Local MCP servers**
-2. Look for `n8n_recon_hub`
+2. Look for your MCP server (name from config, e.g., `n8n`)
 3. Status should show: **Connected** ✅
 
 **If it shows "failed":**
@@ -258,22 +274,34 @@ If working, Claude will query your n8n instance and show your workflows.
 
 ### Error: "Cannot connect to localhost:5678"
 
-**Cause:** n8n not running or port not exposed
+**Cause:** n8n not running, wrong URL, or port not accessible
 
 **Fix:**
+
+**For Docker n8n:**
 ```bash
 # Check if n8n is running
-docker ps | grep n8n_recon_hub
+docker ps | grep n8n
 
-# Check port mapping
-docker port n8n_recon_hub
-
-# Should show: 5678/tcp -> 0.0.0.0:5678
+# Check port mapping (should show 5678)
+docker port <your-n8n-container-name>
 
 # Restart if needed
-cd /Users/tester/Documents/n8n_stuff
-docker compose up -d n8n-recon
+docker compose restart <your-n8n-service-name>
 ```
+
+**For all setups:**
+```bash
+# Test if n8n is accessible
+curl http://localhost:5678/healthz
+
+# Should return: {"status":"ok"}
+```
+
+**For cloud/remote n8n:**
+- Verify the URL is correct and accessible from your computer
+- Check firewall rules allow API access
+- Ensure API authentication is enabled
 
 ### Check MCP Logs:
 
@@ -359,16 +387,22 @@ Once connected, you can ask Claude to:
 
 ---
 
-## Your Setup Summary
+## Configuration Summary Template
 
-| Component | Value |
-|-----------|-------|
-| **n8n Container** | `n8n_recon_hub` |
-| **n8n URL** | `http://localhost:5678` |
-| **Docker Compose Path** | `/Users/tester/Documents/n8n_stuff/docker-compose.yml` |
-| **MCP Package** | `n8n-mcp` (via npx) |
-| **Config File** | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| **n8n Startup** | `cd /Users/tester/Documents/n8n_stuff && ./setup.sh` |
+Fill this out for your specific setup:
+
+| Component | Your Value | Example |
+|-----------|------------|---------|
+| **n8n URL** | _______________ | `http://localhost:5678` or `https://n8n.yourdomain.com` |
+| **n8n API Key** | _______________ | `eyJhbGciOiJIUzI1NiIs...` |
+| **MCP Package** | `n8n-mcp` | Installed via npx (auto-downloads) |
+| **MCP Server Name** | _______________ | `n8n` (can be any name you choose) |
+| **Config File Path** | See below | Depends on your OS |
+
+**Config file locations:**
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
 
 ---
 
