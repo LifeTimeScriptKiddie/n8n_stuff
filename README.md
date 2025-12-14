@@ -198,6 +198,125 @@ Tools are installed on-demand when the AI requests them. No need to pre-install 
 | **OSINT** | `whois`, `theHarvester` |
 | **Cloud** | `aws-cli`, cloud nuclei templates |
 | **Secrets** | `trufflehog`, `gitleaks` |
+| **PDF Generation** | `WeasyPrint`, `html2pdf` helper script |
+
+## PDF Report Generation
+
+Generate professional PDF reports from HTML in your n8n workflows using **WeasyPrint** - a Python-based PDF generator with full Unicode support.
+
+### Features
+- ✅ **Full Unicode support** - Emojis, CJK characters, special symbols
+- ✅ **Professional fonts** - DejaVu, Liberation, Noto (including Noto CJK & Emoji)
+- ✅ **No root required** - Safe for n8n workflows
+- ✅ **CSS styling** - Full CSS support for custom layouts
+- ✅ **Tables & code blocks** - Perfect for security reports
+
+### Usage in n8n
+
+**Execute Command node:**
+
+```bash
+# From HTML file
+html2pdf /tmp/report.html /tmp/report.pdf
+
+# From workflow variable (stdin)
+echo '${{ $json.htmlContent }}' | html2pdf /tmp/report.pdf
+
+# Direct Python usage with custom CSS
+python3 -c "
+from weasyprint import HTML, CSS
+html = '''${{ $json.html }}'''
+HTML(string=html).write_pdf('/tmp/report.pdf')
+"
+```
+
+### Example Workflow: Security Report PDF
+
+1. **Generate HTML Report** (Code node)
+   ```javascript
+   const findings = $input.all();
+   const html = `
+   <!DOCTYPE html>
+   <html>
+   <head>
+     <meta charset="utf-8">
+     <title>Security Assessment Report</title>
+   </head>
+   <body>
+     <h1>Security Assessment Report</h1>
+     <p>Target: ${findings[0].json.target}</p>
+     <table>
+       <tr><th>Severity</th><th>Finding</th><th>Count</th></tr>
+       ${findings.map(f => `<tr>
+         <td>${f.json.severity}</td>
+         <td>${f.json.title}</td>
+         <td>${f.json.count}</td>
+       </tr>`).join('')}
+     </table>
+   </body>
+   </html>
+   `;
+   return { html };
+   ```
+
+2. **Convert to PDF** (Execute Command)
+   ```bash
+   echo '${{ $json.html }}' | html2pdf /tmp/security-report.pdf
+   ```
+
+3. **Read PDF** (Read Binary File)
+   - File path: `/tmp/security-report.pdf`
+
+4. **Save/Send PDF**
+   - Upload to MinIO
+   - Email as attachment
+   - Save to shared drive
+
+### Advanced: Custom Styling
+
+Create a styled report with custom CSS:
+
+```python
+from weasyprint import HTML, CSS
+
+html = '''
+<html>
+<body>
+  <h1>Vulnerability Report 🔒</h1>
+  <p>Critical findings detected 🚨</p>
+</body>
+</html>
+'''
+
+custom_css = CSS(string='''
+  @page {
+    size: A4;
+    margin: 2.5cm;
+    @top-right { content: "Confidential"; }
+  }
+  body {
+    font-family: 'Noto Sans', sans-serif;
+    color: #333;
+  }
+  h1 { color: #c0392b; border-bottom: 2px solid #e74c3c; }
+''')
+
+HTML(string=html).write_pdf('/tmp/report.pdf', stylesheets=[custom_css])
+```
+
+### Available Fonts
+
+The system includes comprehensive font support:
+- **Sans-serif:** DejaVu Sans, Liberation Sans, Noto Sans
+- **Serif:** DejaVu Serif, Liberation Serif, Noto Serif
+- **Monospace:** DejaVu Sans Mono, Liberation Mono
+- **CJK:** Noto Sans CJK (Chinese, Japanese, Korean)
+- **Emoji:** Noto Color Emoji
+
+Check available fonts:
+```bash
+docker exec n8n_recon_hub fc-list
+```
 
 ## Quick Start
 

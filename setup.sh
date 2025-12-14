@@ -686,6 +686,12 @@ verify_tools() {
     docker compose exec -T n8n-recon bash -c "roadrecon --help 2>&1 | head -1" && print_success "ROADrecon"
 
     echo ""
+    echo -e "${CYAN}PDF Generation Tools:${NC}"
+    docker compose exec -T n8n-recon bash -c "python3 -c 'import weasyprint; print(weasyprint.__version__)' 2>&1" && print_success "WeasyPrint"
+    docker compose exec -T n8n-recon bash -c "which html2pdf" > /dev/null && print_success "html2pdf helper script"
+    docker compose exec -T n8n-recon bash -c "fc-list | wc -l | xargs -I {} echo 'Fonts available: {}'" && print_success "Font system"
+
+    echo ""
 }
 
 # ============================================================================
@@ -726,8 +732,28 @@ print_final_info() {
     echo -e "  ${MAGENTA}Vuln Scanning:${NC}     nuclei (auto-updated templates)"
     echo -e "  ${MAGENTA}Exploitation:${NC}      sqlmap, searchsploit"
     echo -e "  ${MAGENTA}Wordlists:${NC}         SecLists (complete collection)"
+    echo -e "  ${MAGENTA}PDF Generation:${NC}    WeasyPrint + html2pdf helper"
     echo ""
 
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  PDF GENERATION${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${YELLOW}WeasyPrint:${NC} Professional HTML to PDF conversion"
+    echo -e "  • Full Unicode support (emojis, CJK characters)"
+    echo -e "  • Multiple font families (DejaVu, Liberation, Noto)"
+    echo -e "  • No root permissions required"
+    echo ""
+    echo -e "  ${YELLOW}Usage in n8n Execute Command node:${NC}"
+    echo -e "  ${GREEN}# From HTML file:${NC}"
+    echo -e "  ${GREEN}html2pdf /tmp/report.html /tmp/report.pdf${NC}"
+    echo ""
+    echo -e "  ${GREEN}# From stdin/variable:${NC}"
+    echo -e "  ${GREEN}echo '\${{ \$json.html }}' | html2pdf /tmp/report.pdf${NC}"
+    echo ""
+    echo -e "  ${GREEN}# Direct Python usage:${NC}"
+    echo -e "  ${GREEN}python3 -c \"from weasyprint import HTML; HTML(string='<h1>Test</h1>').write_pdf('/tmp/out.pdf')\"${NC}"
+    echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  USEFUL COMMANDS${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

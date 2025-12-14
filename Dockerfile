@@ -29,6 +29,21 @@ RUN apk update && apk add --no-cache \
     py3-pip \
     # Go language (for installing tools on demand)
     go \
+    # PDF Generation dependencies (WeasyPrint)
+    cairo \
+    pango \
+    gdk-pixbuf \
+    libffi-dev \
+    harfbuzz \
+    freetype \
+    fontconfig \
+    # Fonts for professional PDF rendering
+    ttf-dejavu \
+    ttf-liberation \
+    ttf-freefont \
+    font-noto \
+    font-noto-cjk \
+    font-noto-emoji \
     # Utilities
     jq \
     ncurses
@@ -58,6 +73,97 @@ RUN apk add --no-cache --virtual .cloud-deps gcc g++ musl-dev python3-dev libffi
     roadlib \
     roadrecon && \
     apk del .cloud-deps
+
+# Install WeasyPrint for PDF generation from HTML
+RUN pip3 install --no-cache-dir --break-system-packages weasyprint
+
+# Refresh font cache for proper rendering
+RUN fc-cache -f -v
+
+# Create html2pdf helper script for easy PDF generation in n8n workflows
+RUN cat > /usr/local/bin/html2pdf << 'EOF'
+#!/usr/bin/env python3
+"""
+HTML to PDF Converter using WeasyPrint
+Usage:
+  html2pdf <input.html> <output.pdf>
+  echo "<html>...</html>" | html2pdf output.pdf
+  html2pdf output.pdf  (reads HTML from stdin)
+"""
+import sys
+from weasyprint import HTML, CSS
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: html2pdf <input.html> <output.pdf>", file=sys.stderr)
+        print("   or: html2pdf <output.pdf>  (reads HTML from stdin)", file=sys.stderr)
+        print("   or: echo '<html>...</html>' | html2pdf output.pdf", file=sys.stderr)
+        sys.exit(1)
+
+    # Determine input source and output file
+    if len(sys.argv) == 3:
+        # html2pdf input.html output.pdf
+        input_file = sys.argv[1]
+        output_file = sys.argv[2]
+        with open(input_file, 'r') as f:
+            html_content = f.read()
+    elif len(sys.argv) == 2:
+        # html2pdf output.pdf (stdin)
+        output_file = sys.argv[1]
+        html_content = sys.stdin.read()
+    else:
+        print("Error: Invalid arguments", file=sys.stderr)
+        sys.exit(1)
+
+    # Optional CSS for better defaults
+    default_css = CSS(string='''
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: 'DejaVu Sans', 'Liberation Sans', 'Noto Sans', sans-serif;
+            font-size: 11pt;
+            line-height: 1.6;
+        }
+        pre, code {
+            font-family: 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+            background-color: #f4f4f4;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+    ''')
+
+    try:
+        # Generate PDF
+        HTML(string=html_content).write_pdf(
+            output_file,
+            stylesheets=[default_css]
+        )
+        print(f"PDF generated successfully: {output_file}", file=sys.stderr)
+    except Exception as e:
+        print(f"Error generating PDF: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
+EOF
+
+RUN chmod +x /usr/local/bin/html2pdf
 
 # Create tool installer script (LLM can use this to install tools on demand)
 RUN echo '#!/bin/sh' > /usr/local/bin/install-tool && \

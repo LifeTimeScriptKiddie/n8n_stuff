@@ -38,7 +38,7 @@
               "id": "1",
               "name": "target",
               "type": "string",
-              "value": "={{ $json[\"Target (Domain or IP/Network)\"] }}"
+              "value": "={{ $json.target }}"
             },
             {
               "id": "2",
@@ -50,7 +50,7 @@
               "id": "0a15fc2e-83fa-4f10-bfc4-5031a2b3381c",
               "name": "report_password",
               "type": "string",
-              "value": "Almafa123456"
+              "value": "test"
             }
           ]
         },
@@ -68,51 +68,17 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "version": 2,
-            "leftValue": "",
-            "caseSensitive": true,
-            "typeValidation": "strict"
-          },
-          "conditions": [
-            {
-              "id": "is-domain",
-              "operator": {
-                "type": "string",
-                "operation": "regex",
-                "rightValue": "^(?!\\d+\\.\\d+\\.\\d+\\.\\d+)([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$"
-              },
-              "leftValue": "={{ $json.target }}"
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "8cf079cc-5657-411e-a162-b303ae0d6e5a",
-      "name": "Is Target a Domain?",
-      "type": "n8n-nodes-base.if",
-      "position": [
-        1680,
-        304
-      ],
-      "typeVersion": 2.2,
-      "notes": "Checks if target is a domain (not an IP). True branch = domain path (subdomain enum), False branch = IP path (direct scan)"
-    },
-    {
-      "parameters": {
         "command": "=# Install Security Tools\necho \"Installing security tools...\"\n\n# Install Go (required for many tools)\nif ! command -v go &> /dev/null; then\n  echo \"Installing Go...\"\n  apk add --no-cache go\nfi\n\n# Install Node.js and npm if not present (for puppeteer)\nif ! command -v node &> /dev/null; then\n  echo \"Installing Node.js...\"\n  apk add --no-cache nodejs npm chromium\nfi\n\n# Install puppeteer\nif [ ! -d \"/root/.npm-global/lib/node_modules/puppeteer\" ]; then\n  echo \"Installing puppeteer...\"\n  npm install -g puppeteer --unsafe-perm=true --allow-root\n  # Set chromium path for puppeteer\n  export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true\n  export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser\nfi\n\n# Install subfinder\nif ! command -v subfinder &> /dev/null; then\n  echo \"Installing subfinder...\"\n  go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest\n  cp /root/go/bin/subfinder /usr/local/bin/\nfi\n\n# Install httpx\nif ! command -v httpx &> /dev/null; then\n  echo \"Installing httpx...\"\n  go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest\n  cp /root/go/bin/httpx /usr/local/bin/\nfi\n\n# Install nuclei\nif ! command -v nuclei &> /dev/null; then\n  echo \"Installing nuclei...\"\n  go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest\n  cp /root/go/bin/nuclei /usr/local/bin/\n  nuclei -update-templates\nfi\n\n# Install amass\nif ! command -v amass &> /dev/null; then\n  echo \"Installing amass...\"\n  go install -v github.com/owasp-amass/amass/v4/...@master\n  cp /root/go/bin/amass /usr/local/bin/\nfi\n\n# dig and whois should be pre-installed, but check\napk add --no-cache bind-tools whois curl wget\n\necho \"All tools installed successfully!\"\necho \"subfinder: $(subfinder -version 2>&1 | head -1)\"\necho \"httpx: $(httpx -version 2>&1 | head -1)\"\necho \"nuclei: $(nuclei -version 2>&1 | head -1)\"\necho \"amass: $(amass -version 2>&1 | head -1)\"\necho \"node: $(node --version)\"\necho \"chromium: $(chromium-browser --version)\""
       },
       "id": "86ff4f3c-a467-43f8-9845-1e3475b4e94b",
       "name": "Install Security Tools",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        2000,
-        80
+        1984,
+        -112
       ],
       "typeVersion": 1,
-      "notes": "Install subfinder, httpx, nuclei, amass, dig, whois, and puppeteer for PDF generation"
+      "notes": "Install all bug bounty tools: subfinder, amass, httpx, nuclei, naabu, gobuster, waybackurls, whatweb, testssl, theHarvester, dnsrecon, trufflehog, and puppeteer"
     },
     {
       "parameters": {
@@ -122,8 +88,8 @@
       "name": "Whois Lookup",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        2320,
-        80
+        2304,
+        -112
       ],
       "typeVersion": 1,
       "notes": "Gather domain registration and ownership info"
@@ -137,7 +103,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "position": [
         2640,
-        0
+        -240
       ],
       "typeVersion": 1,
       "notes": "Fast subdomain discovery using multiple sources"
@@ -150,8 +116,8 @@
       "name": "Amass Subdomain Enum",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        2640,
-        160
+        2624,
+        -32
       ],
       "typeVersion": 1,
       "notes": "Deep subdomain discovery and attack surface mapping"
@@ -164,8 +130,8 @@
       "name": "Merge & Deduplicate Subdomains",
       "type": "n8n-nodes-base.code",
       "position": [
-        2960,
-        80
+        2912,
+        -128
       ],
       "typeVersion": 2,
       "notes": "Combine results from subfinder and amass"
@@ -178,8 +144,8 @@
       "name": "DNS Resolution (dig)",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        3280,
-        80
+        3104,
+        -416
       ],
       "typeVersion": 1,
       "notes": "Resolve all subdomains to IP addresses"
@@ -192,8 +158,8 @@
       "name": "HTTP Probing (httpx) - Domain",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        3600,
-        80
+        3344,
+        -208
       ],
       "typeVersion": 1,
       "notes": "Find live web services on subdomains"
@@ -206,8 +172,8 @@
       "name": "Parse httpx Results",
       "type": "n8n-nodes-base.code",
       "position": [
-        3920,
-        80
+        3856,
+        -432
       ],
       "typeVersion": 2,
       "notes": "Parse httpx JSON output"
@@ -220,25 +186,25 @@
       "name": "Extract Unique IPs",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        4240,
-        80
+        3360,
+        -656
       ],
       "typeVersion": 1,
       "notes": "Get unique IP addresses for port scanning"
     },
     {
       "parameters": {
-        "command": "=# Run nmap scan on discovered IPs or direct target\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\necho \"Running nmap scan on: $target\"\n\nnmap -Pn -sT -sV -sC -p- -T4 --min-parallelism 40 --max-parallelism 250 --max-retries 2 -oX /tmp/nmap_{{ $('1. Set Parameters').item.json.timestamp }}.xml \"$target\"\n\ncat /tmp/nmap_{{ $('1. Set Parameters').item.json.timestamp }}.xml"
+        "command": "=# Nmap Stealth Scan - Bug Bounty Safe\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\necho \"Running stealth nmap scan on: $target\"\n\n# Use top 1000 ports only, stealth timing, less aggressive\nnmap -Pn -sT -sV --version-intensity 2 \\\n  --top-ports 1000 \\\n  -T3 --max-parallelism 20 --max-retries 1 \\\n  --scan-delay 100ms \\\n  -oX /tmp/nmap_{{ $('1. Set Parameters').item.json.timestamp }}.xml \"$target\"\n\ncat /tmp/nmap_{{ $('1. Set Parameters').item.json.timestamp }}.xml"
       },
       "id": "a03e65eb-17f5-4d9f-b414-13b040ad07e4",
-      "name": "Nmap Port Scan",
+      "name": "Nmap Stealth Port Scan",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        4560,
-        304
+        3744,
+        480
       ],
       "typeVersion": 1,
-      "notes": "Comprehensive port and service detection"
+      "notes": "Stealthier port scan - top ports only, slower timing to avoid detection"
     },
     {
       "parameters": {
@@ -248,8 +214,8 @@
       "name": "Parse Nmap Results",
       "type": "n8n-nodes-base.code",
       "position": [
-        4880,
-        304
+        4448,
+        416
       ],
       "typeVersion": 2,
       "notes": "Extract all services with version details"
@@ -262,8 +228,8 @@
       "name": "Nuclei Vulnerability Scan",
       "type": "n8n-nodes-base.executeCommand",
       "position": [
-        4240,
-        304
+        4336,
+        -288
       ],
       "typeVersion": 1,
       "notes": "Automated vulnerability scanning with nuclei templates"
@@ -276,7 +242,7 @@
       "name": "Parse Nuclei Results",
       "type": "n8n-nodes-base.code",
       "position": [
-        4560,
+        4704,
         80
       ],
       "typeVersion": 2,
@@ -298,7 +264,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// COMPREHENSIVE REPORT PREPARATION WITH SAFE NODE ACCESS\nconsole.log('=== PREPARING COMPREHENSIVE REPORT ===');\n\nconst target = $('1. Set Parameters').first().json.target;\nconst timestamp = $('1. Set Parameters').first().json.timestamp;\n\n// Helper function to safely get data from nodes that may not have executed\nfunction safeGetNodeData(nodeName, dataPath) {\n  try {\n    const nodeData = $(nodeName).first();\n    const keys = dataPath.split('.');\n    let value = nodeData;\n    for (const key of keys) {\n      value = value[key];\n      if (value === undefined) return null;\n    }\n    return value;\n  } catch (error) {\n    return null;\n  }\n}\n\n// Safely gather data from executed nodes only\nconst whoisData = safeGetNodeData('Whois Lookup', 'json.stdout') || 'N/A (IP/Network scan - no WHOIS lookup performed)';\nconst subdomains = safeGetNodeData('Merge & Deduplicate Subdomains', 'json.subdomains') || [];\nconst httpServices = safeGetNodeData('Parse httpx Results', 'json.httpServices') || [];\nconst nmapServices = safeGetNodeData('Parse Nmap Results', 'json.services') || [];\nconst nucleiFindings = safeGetNodeData('Parse Nuclei Results', 'json.nucleiFindings') || [];\nconst cveData = safeGetNodeData('CVE Enrichment (NVD)', 'json.cveEnriched') || [];\n\n// Detect scan type based on what data we have\nconst isDomainScan = subdomains.length > 0 || whoisData.includes('Domain') || whoisData.includes('Registrar');\nconst scanType = isDomainScan ? 'Domain-Based Attack Surface Assessment' : 'Network/IP-Based Vulnerability Assessment';\n\nconsole.log(`Scan Type: ${scanType}`);\nconsole.log(`Target: ${target}`);\nconsole.log(`Subdomains: ${subdomains.length}`);\nconsole.log(`HTTP Services: ${httpServices.length}`);\nconsole.log(`Nmap Services: ${nmapServices.length}`);\nconsole.log(`Nuclei Findings: ${nucleiFindings.length}`);\nconsole.log(`CVE Data: ${cveData.length}`);\n\n// Build comprehensive report structure\n\nconst report = {\n  metadata: {\n    title: 'Advanced Attack Surface Assessment Report',\n    subtitle: scanType,\n    version: '2.0.0',\n    scanDate: new Date().toISOString().split('T')[0],\n    scanTime: new Date().toISOString().split('T')[1].split('.')[0],\n    scanTarget: target,\n    scanType: isDomainScan ? 'domain' : 'ip'\n  },\n  whois: whoisData,\n  subdomainEnumeration: {\n    count: subdomains.length,\n    domains: subdomains\n  },\n  httpDiscovery: {\n    count: httpServices.length,\n    services: httpServices\n  },\n  portScanning: {\n    count: nmapServices.length,\n    services: nmapServices\n  },\n  nucleiVulnerabilities: {\n    count: nucleiFindings.length,\n    findings: nucleiFindings,\n    severityBreakdown: {\n      critical: nucleiFindings.filter(f => f.severity === 'critical').length,\n      high: nucleiFindings.filter(f => f.severity === 'high').length,\n      medium: nucleiFindings.filter(f => f.severity === 'medium').length,\n      low: nucleiFindings.filter(f => f.severity === 'low').length,\n      info: nucleiFindings.filter(f => f.severity === 'info').length\n    }\n  },\n  cveFindings: {\n    count: cveData.length,\n    data: cveData\n  },\n  statistics: {\n    totalSubdomains: subdomains.length,\n    totalHttpServices: httpServices.length,\n    totalPorts: nmapServices.length,\n    totalNucleiFindings: nucleiFindings.length,\n    totalCVEs: cveData.filter(c => c.cveId !== 'N/A').length\n  }\n};\n\nconsole.log('✓ Comprehensive report structure prepared');\nconsole.log(`✓ Report type: ${scanType}`);\n\nreturn [{json: report}];"
+        "jsCode": "// ENHANCED REPORT PREPARATION WITH ALL NEW TOOLS\nconsole.log('=== PREPARING COMPREHENSIVE BUG BOUNTY REPORT ===');\n\nconst target = $('1. Set Parameters').first().json.target;\nconst timestamp = $('1. Set Parameters').first().json.timestamp;\n\nfunction safeGetNodeData(nodeName, dataPath) {\n  try {\n    const nodeData = $(nodeName).first();\n    const keys = dataPath.split('.');\n    let value = nodeData;\n    for (const key of keys) {\n      value = value[key];\n      if (value === undefined) return null;\n    }\n    return value;\n  } catch (error) {\n    return null;\n  }\n}\n\n// Gather data from all nodes\nconst whoisData = safeGetNodeData('Whois Lookup', 'json.stdout') || 'N/A';\nconst subdomains = safeGetNodeData('Merge & Deduplicate Subdomains', 'json.subdomains') || [];\nconst httpServices = safeGetNodeData('Parse httpx Results', 'json.httpServices') || [];\nconst nmapServices = safeGetNodeData('Parse Nmap Results', 'json.services') || [];\nconst nucleiFindings = safeGetNodeData('Parse Nuclei Results', 'json.nucleiFindings') || [];\nconst cveData = safeGetNodeData('CVE Enrichment (NVD)', 'json.cveEnriched') || [];\n\n// NEW: Web recon data\nconst webRecon = safeGetNodeData('Parse Web Recon Results', 'json.webRecon') || {\n  waybackUrls: [],\n  gobusterFindings: [],\n  whatwebTech: [],\n  testsslIssues: [],\n  secrets: []\n};\n\nconst isDomainScan = subdomains.length > 0 || whoisData.includes('Domain');\nconst scanType = isDomainScan ? 'Domain-Based Attack Surface Assessment' : 'Network/IP-Based Vulnerability Assessment';\n\nconsole.log(`Scan Type: ${scanType}`);\nconsole.log(`Subdomains: ${subdomains.length}`);\nconsole.log(`HTTP Services: ${httpServices.length}`);\nconsole.log(`Nmap Services: ${nmapServices.length}`);\nconsole.log(`Nuclei Findings: ${nucleiFindings.length}`);\nconsole.log(`CVEs: ${cveData.length}`);\nconsole.log(`Wayback URLs: ${webRecon.waybackUrls.length}`);\nconsole.log(`Directories: ${webRecon.gobusterFindings.length}`);\nconsole.log(`SSL Issues: ${webRecon.testsslIssues.length}`);\nconsole.log(`Secrets: ${webRecon.secrets.length}`);\n\nconst report = {\n  metadata: {\n    title: 'Advanced Bug Bounty Reconnaissance Report',\n    subtitle: scanType,\n    version: '3.0.0',\n    scanDate: new Date().toISOString().split('T')[0],\n    scanTime: new Date().toISOString().split('T')[1].split('.')[0],\n    scanTarget: target,\n    scanType: isDomainScan ? 'domain' : 'ip'\n  },\n  whois: whoisData,\n  subdomainEnumeration: {\n    count: subdomains.length,\n    domains: subdomains\n  },\n  httpDiscovery: {\n    count: httpServices.length,\n    services: httpServices\n  },\n  portScanning: {\n    count: nmapServices.length,\n    services: nmapServices\n  },\n  nucleiVulnerabilities: {\n    count: nucleiFindings.length,\n    findings: nucleiFindings,\n    severityBreakdown: {\n      critical: nucleiFindings.filter(f => f.severity === 'critical').length,\n      high: nucleiFindings.filter(f => f.severity === 'high').length,\n      medium: nucleiFindings.filter(f => f.severity === 'medium').length,\n      low: nucleiFindings.filter(f => f.severity === 'low').length,\n      info: nucleiFindings.filter(f => f.severity === 'info').length\n    }\n  },\n  cveFindings: {\n    count: cveData.length,\n    data: cveData\n  },\n  webReconnaissance: webRecon,\n  statistics: {\n    totalSubdomains: subdomains.length,\n    totalHttpServices: httpServices.length,\n    totalPorts: nmapServices.length,\n    totalNucleiFindings: nucleiFindings.length,\n    totalCVEs: cveData.filter(c => c.cveId !== 'N/A').length,\n    totalWaybackUrls: webRecon.waybackUrls.length,\n    totalDirectories: webRecon.gobusterFindings.length,\n    totalTechnologies: webRecon.whatwebTech.length,\n    totalSslIssues: webRecon.testsslIssues.length,\n    totalSecrets: webRecon.secrets.length\n  }\n};\n\nconsole.log('✓ Enhanced report structure prepared');\nreturn [{json: report}];"
       },
       "id": "0a3b8f8a-b887-405d-b3d3-c1ac19a664f4",
       "name": "Prepare Comprehensive Report",
@@ -312,7 +278,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// GENERATE COMPREHENSIVE HTML REPORT\nconst report = items[0].json;\nconst meta = report.metadata;\n\nconsole.log('=== GENERATING COMPREHENSIVE HTML REPORT ===');\n\nfunction severityColor(severity) {\n  const colors = {\n    'critical': '#c62828',\n    'high': '#f57c00',\n    'medium': '#fbc02d',\n    'low': '#388e3c',\n    'info': '#1976d2',\n    'error': '#9e9e9e',\n    'unknown': '#757575'\n  };\n  return colors[(severity || 'info').toLowerCase()] || '#757575';\n}\n\nfunction severityBadge(severity) {\n  const color = severityColor(severity);\n  return `<span class=\"severity-badge\" style=\"background-color:${color}\">${(severity || 'INFO').toUpperCase()}</span>`;\n}\n\nlet html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>${meta.title}</title>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body {\n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\n      line-height: 1.6;\n      color: #333;\n      background-color: #f5f5f5;\n    }\n    .container {\n      max-width: 1400px;\n      margin: 0 auto;\n      padding: 20px;\n      background-color: white;\n      box-shadow: 0 0 20px rgba(0,0,0,0.1);\n    }\n    .header {\n      background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);\n      color: white;\n      padding: 40px 30px;\n      margin: -20px -20px 30px -20px;\n    }\n    .header h1 { font-size: 32px; margin-bottom: 10px; }\n    .header .subtitle { font-size: 16px; opacity: 0.9; }\n    .meta-info {\n      background-color: #f9f9f9;\n      border-left: 4px solid #1976d2;\n      padding: 15px 20px;\n      margin-bottom: 30px;\n    }\n    h2 {\n      color: #1976d2;\n      font-size: 28px;\n      margin: 40px 0 20px 0;\n      padding-bottom: 10px;\n      border-bottom: 2px solid #e0e0e0;\n    }\n    h3 { color: #424242; font-size: 22px; margin: 30px 0 15px 0; }\n    .stats-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));\n      gap: 20px;\n      margin: 20px 0;\n    }\n    .stat-card {\n      background-color: #f9f9f9;\n      padding: 20px;\n      border-radius: 8px;\n      border-left: 4px solid #1976d2;\n    }\n    .stat-card .label { font-size: 14px; color: #757575; margin-bottom: 8px; }\n    .stat-card .value { font-size: 36px; font-weight: bold; color: #1976d2; }\n    .severity-badge {\n      display: inline-block;\n      padding: 4px 12px;\n      border-radius: 4px;\n      color: white;\n      font-size: 12px;\n      font-weight: 600;\n      text-transform: uppercase;\n      margin: 2px;\n    }\n    .section {\n      background-color: #fafafa;\n      padding: 20px;\n      border-radius: 8px;\n      margin: 20px 0;\n    }\n    .list-item {\n      background-color: white;\n      padding: 15px;\n      margin: 10px 0;\n      border-radius: 6px;\n      border-left: 4px solid #1976d2;\n    }\n    table {\n      width: 100%;\n      border-collapse: collapse;\n      margin: 20px 0;\n      background-color: white;\n      box-shadow: 0 1px 3px rgba(0,0,0,0.1);\n    }\n    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e0e0e0; }\n    th { background-color: #f5f5f5; font-weight: 600; color: #424242; text-transform: uppercase; font-size: 12px; }\n    tr:hover { background-color: #fafafa; }\n    .whois-box {\n      background-color: #f5f5f5;\n      padding: 15px;\n      border-radius: 6px;\n      font-family: monospace;\n      font-size: 12px;\n      white-space: pre-wrap;\n      max-height: 400px;\n      overflow-y: auto;\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>${meta.title}</h1>\n      <div class=\"subtitle\">${meta.subtitle}</div>\n    </div>\n\n    <div class=\"meta-info\">\n      <div><strong>Target:</strong> ${meta.scanTarget}</div>\n      <div><strong>Scan Date:</strong> ${meta.scanDate} ${meta.scanTime}</div>\n      <div><strong>Report Version:</strong> ${meta.version}</div>\n    </div>\n\n    <h2>Executive Summary</h2>\n    <div class=\"stats-grid\">\n      <div class=\"stat-card\">\n        <div class=\"label\">Subdomains Found</div>\n        <div class=\"value\">${report.statistics.totalSubdomains}</div>\n      </div>\n      <div class=\"stat-card\">\n        <div class=\"label\">HTTP Services</div>\n        <div class=\"value\">${report.statistics.totalHttpServices}</div>\n      </div>\n      <div class=\"stat-card\">\n        <div class=\"label\">Open Ports</div>\n        <div class=\"value\">${report.statistics.totalPorts}</div>\n      </div>\n      <div class=\"stat-card\">\n        <div class=\"label\">Nuclei Findings</div>\n        <div class=\"value\">${report.statistics.totalNucleiFindings}</div>\n      </div>\n      <div class=\"stat-card\">\n        <div class=\"label\">CVEs Found</div>\n        <div class=\"value\">${report.statistics.totalCVEs}</div>\n      </div>\n    </div>\n\n    <h2>Domain Intelligence (WHOIS)</h2>\n    <div class=\"whois-box\">${report.whois}</div>\n\n    <h2>Subdomain Enumeration</h2>\n    <p><strong>Total subdomains discovered:</strong> ${report.subdomainEnumeration.count}</p>\n    <div class=\"section\">`;\n\nfor (const domain of report.subdomainEnumeration.domains.slice(0, 100)) {\n  html += `<div class=\"list-item\">${domain}</div>`;\n}\n\nif (report.subdomainEnumeration.count > 100) {\n  html += `<p><em>... and ${report.subdomainEnumeration.count - 100} more subdomains</em></p>`;\n}\n\nhtml += `</div>\n\n    <h2>HTTP Service Discovery</h2>\n    <p><strong>Total live HTTP services:</strong> ${report.httpDiscovery.count}</p>\n    <table>\n      <thead>\n        <tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th><th>Technologies</th></tr>\n      </thead>\n      <tbody>`;\n\nfor (const svc of report.httpDiscovery.services.slice(0, 50)) {\n  html += `<tr>\n    <td><a href=\"${svc.url}\" target=\"_blank\">${svc.url}</a></td>\n    <td>${svc.statusCode}</td>\n    <td>${svc.title || '-'}</td>\n    <td>${svc.webServer || '-'}</td>\n    <td>${svc.technologies.join(', ') || '-'}</td>\n  </tr>`;\n}\n\nhtml += `</tbody></table>\n\n    <h2>Nuclei Vulnerability Findings</h2>\n    <h3>Severity Breakdown</h3>\n    <div style=\"display: flex; gap: 15px; margin: 20px 0;\">\n      <div style=\"padding: 15px; background: #f9f9f9; border-radius: 6px; border-top: 4px solid ${severityColor('critical')};\">\n        <div style=\"font-size: 28px; font-weight: bold; color: ${severityColor('critical')};\">${report.nucleiVulnerabilities.severityBreakdown.critical}</div>\n        <div style=\"font-size: 12px; text-transform: uppercase; color: ${severityColor('critical')};\">Critical</div>\n      </div>\n      <div style=\"padding: 15px; background: #f9f9f9; border-radius: 6px; border-top: 4px solid ${severityColor('high')};\">\n        <div style=\"font-size: 28px; font-weight: bold; color: ${severityColor('high')};\">${report.nucleiVulnerabilities.severityBreakdown.high}</div>\n        <div style=\"font-size: 12px; text-transform: uppercase; color: ${severityColor('high')};\">High</div>\n      </div>\n      <div style=\"padding: 15px; background: #f9f9f9; border-radius: 6px; border-top: 4px solid ${severityColor('medium')};\">\n        <div style=\"font-size: 28px; font-weight: bold; color: ${severityColor('medium')};\">${report.nucleiVulnerabilities.severityBreakdown.medium}</div>\n        <div style=\"font-size: 12px; text-transform: uppercase; color: ${severityColor('medium')};\">Medium</div>\n      </div>\n      <div style=\"padding: 15px; background: #f9f9f9; border-radius: 6px; border-top: 4px solid ${severityColor('low')};\">\n        <div style=\"font-size: 28px; font-weight: bold; color: ${severityColor('low')};\">${report.nucleiVulnerabilities.severityBreakdown.low}</div>\n        <div style=\"font-size: 12px; text-transform: uppercase; color: ${severityColor('low')};\">Low</div>\n      </div>\n    </div>\n\n    <h3>Nuclei Findings Details</h3>\n    <table>\n      <thead>\n        <tr><th>Template</th><th>Name</th><th>Severity</th><th>Host</th><th>Matched At</th></tr>\n      </thead>\n      <tbody>`;\n\nfor (const finding of report.nucleiVulnerabilities.findings) {\n  html += `<tr>\n    <td><code>${finding.templateId}</code></td>\n    <td>${finding.name}</td>\n    <td>${severityBadge(finding.severity)}</td>\n    <td>${finding.host}</td>\n    <td>${finding.matchedAt}</td>\n  </tr>`;\n}\n\nhtml += `</tbody></table>\n\n    <h2>Port Scanning Results</h2>\n    <table>\n      <thead>\n        <tr><th>IP</th><th>Port</th><th>Protocol</th><th>Service</th><th>Product</th><th>Version</th></tr>\n      </thead>\n      <tbody>`;\n\nfor (const svc of report.portScanning.services) {\n  html += `<tr>\n    <td>${svc.ip}</td>\n    <td><strong>${svc.port}</strong></td>\n    <td>${svc.protocol}</td>\n    <td>${svc.service}</td>\n    <td>${svc.product || '-'}</td>\n    <td>${svc.version || '-'}</td>\n  </tr>`;\n}\n\nhtml += `</tbody></table>\n\n    <h2>CVE Findings</h2>\n    <p><strong>Total CVEs:</strong> ${report.cveFindings.count}</p>\n    <table>\n      <thead>\n        <tr><th>IP:Port</th><th>Service</th><th>CVE ID</th><th>Severity</th><th>CVSS</th><th>Description</th></tr>\n      </thead>\n      <tbody>`;\n\nfor (const cve of report.cveFindings.data.filter(c => c.cveId !== 'N/A')) {\n  html += `<tr>\n    <td>${cve.ip}:${cve.port}</td>\n    <td>${cve.product} ${cve.version}</td>\n    <td><strong>${cve.cveId}</strong></td>\n    <td>${severityBadge(cve.severity)}</td>\n    <td>${cve.cvssScore}</td>\n    <td>${cve.cveSummary.substring(0, 150)}...</td>\n  </tr>`;\n}\n\nhtml += `</tbody></table>\n\n  </div>\n</body>\n</html>`;\n\nconsole.log('✓ Comprehensive HTML report generated');\n\nconst buffer = Buffer.from(html, 'utf-8');\nreturn [{\n  json: { html: html },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'text/html',\n      fileName: 'comprehensive_report.html'\n    }\n  }\n}];"
+        "jsCode": "// ENHANCED HTML REPORT WITH ALL BUG BOUNTY FINDINGS\nconst report = items[0].json;\nconst meta = report.metadata;\nconst webRecon = report.webReconnaissance || {};\n\nconsole.log('=== GENERATING ENHANCED BUG BOUNTY REPORT ===');\n\nfunction severityColor(severity) {\n  const colors = {\n    'critical': '#c62828', 'high': '#f57c00', 'medium': '#fbc02d',\n    'low': '#388e3c', 'info': '#1976d2', 'error': '#9e9e9e', 'unknown': '#757575'\n  };\n  return colors[(severity || 'info').toLowerCase()] || '#757575';\n}\n\nfunction severityBadge(severity) {\n  return `<span class=\"severity-badge\" style=\"background-color:${severityColor(severity)}\">${(severity || 'INFO').toUpperCase()}</span>`;\n}\n\nlet html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>${meta.title}</title>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }\n    .container { max-width: 1400px; margin: 0 auto; padding: 20px; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%); color: white; padding: 40px 30px; margin: -20px -20px 30px -20px; }\n    .header h1 { font-size: 32px; margin-bottom: 10px; }\n    .header .subtitle { font-size: 16px; opacity: 0.9; }\n    .meta-info { background: #f9f9f9; border-left: 4px solid #1976d2; padding: 15px 20px; margin-bottom: 30px; }\n    h2 { color: #1976d2; font-size: 28px; margin: 40px 0 20px 0; padding-bottom: 10px; border-bottom: 2px solid #e0e0e0; }\n    h3 { color: #424242; font-size: 22px; margin: 30px 0 15px 0; }\n    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0; }\n    .stat-card { background: #f9f9f9; padding: 20px; border-radius: 8px; border-left: 4px solid #1976d2; }\n    .stat-card .label { font-size: 12px; color: #757575; margin-bottom: 8px; }\n    .stat-card .value { font-size: 28px; font-weight: bold; color: #1976d2; }\n    .severity-badge { display: inline-block; padding: 4px 12px; border-radius: 4px; color: white; font-size: 12px; font-weight: 600; text-transform: uppercase; margin: 2px; }\n    .section { background: #fafafa; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .list-item { background: white; padding: 12px; margin: 8px 0; border-radius: 4px; border-left: 3px solid #1976d2; font-size: 14px; }\n    table { width: 100%; border-collapse: collapse; margin: 20px 0; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }\n    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e0e0e0; font-size: 13px; }\n    th { background: #f5f5f5; font-weight: 600; color: #424242; text-transform: uppercase; font-size: 11px; }\n    tr:hover { background: #fafafa; }\n    .whois-box { background: #f5f5f5; padding: 15px; border-radius: 6px; font-family: monospace; font-size: 11px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }\n    .secret-alert { background: #fff3cd; border-left: 4px solid #f57c00; padding: 15px; margin: 10px 0; border-radius: 4px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>${meta.title}</h1>\n      <div class=\"subtitle\">${meta.subtitle}</div>\n    </div>\n    <div class=\"meta-info\">\n      <div><strong>Target:</strong> ${meta.scanTarget}</div>\n      <div><strong>Scan Date:</strong> ${meta.scanDate} ${meta.scanTime}</div>\n      <div><strong>Report Version:</strong> ${meta.version}</div>\n    </div>\n    <h2>Executive Summary</h2>\n    <div class=\"stats-grid\">\n      <div class=\"stat-card\"><div class=\"label\">Subdomains</div><div class=\"value\">${report.statistics.totalSubdomains}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">HTTP Services</div><div class=\"value\">${report.statistics.totalHttpServices}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Open Ports</div><div class=\"value\">${report.statistics.totalPorts}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Vulnerabilities</div><div class=\"value\">${report.statistics.totalNucleiFindings}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">CVEs</div><div class=\"value\">${report.statistics.totalCVEs}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Wayback URLs</div><div class=\"value\">${report.statistics.totalWaybackUrls}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Directories</div><div class=\"value\">${report.statistics.totalDirectories}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">SSL Issues</div><div class=\"value\">${report.statistics.totalSslIssues}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">⚠️ Secrets</div><div class=\"value\" style=\"color: ${report.statistics.totalSecrets > 0 ? '#f57c00' : '#388e3c'}\">${report.statistics.totalSecrets}</div></div>\n    </div>`;\n\n// Secrets Section (CRITICAL)\nif (webRecon.secrets && webRecon.secrets.length > 0) {\n  html += `\n    <h2>🔥 Exposed Secrets (HIGH PRIORITY)</h2>\n    <div class=\"secret-alert\">\n      <strong>WARNING:</strong> ${webRecon.secrets.length} potential secrets or credentials detected!\n    </div>\n    <table>\n      <thead><tr><th>Type</th><th>Source</th><th>Preview</th></tr></thead>\n      <tbody>`;\n  \n  for (const secret of webRecon.secrets.slice(0, 20)) {\n    html += `<tr>\n      <td><strong>${secret.DetectorName || 'Unknown'}</strong></td>\n      <td>${secret.SourceMetadata?.Data?.Filesystem?.file || 'N/A'}</td>\n      <td><code>${(secret.Raw || '').substring(0, 50)}...</code></td>\n    </tr>`;\n  }\n  html += `</tbody></table>`;\n}\n\nhtml += `\n    <h2>Subdomain Enumeration</h2>\n    <p><strong>Total: </strong>${report.subdomainEnumeration.count}</p>\n    <div class=\"section\">`;\nfor (const domain of report.subdomainEnumeration.domains.slice(0, 50)) {\n  html += `<div class=\"list-item\">${domain}</div>`;\n}\nif (report.subdomainEnumeration.count > 50) html += `<p><em>... and ${report.subdomainEnumeration.count - 50} more</em></p>`;\n\nhtml += `</div>\n    <h2>HTTP Service Discovery</h2>\n    <table>\n      <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th><th>Tech</th></tr></thead>\n      <tbody>`;\nfor (const svc of report.httpDiscovery.services.slice(0, 30)) {\n  html += `<tr>\n    <td><a href=\"${svc.url}\" target=\"_blank\">${svc.url}</a></td>\n    <td>${svc.statusCode}</td>\n    <td>${(svc.title || '-').substring(0, 50)}</td>\n    <td>${svc.webServer || '-'}</td>\n    <td>${(svc.technologies || []).join(', ').substring(0, 40) || '-'}</td>\n  </tr>`;\n}\nhtml += `</tbody></table>`;\n\n// Wayback URLs\nif (webRecon.waybackUrls && webRecon.waybackUrls.length > 0) {\n  html += `\n    <h2>Historical URLs (Wayback Machine)</h2>\n    <p><strong>Interesting endpoints discovered:</strong> ${webRecon.waybackUrls.length}</p>\n    <div class=\"section\">`;\n  for (const url of webRecon.waybackUrls.slice(0, 50)) {\n    html += `<div class=\"list-item\">${url}</div>`;\n  }\n  html += `</div>`;\n}\n\n// Directory Findings\nif (webRecon.gobusterFindings && webRecon.gobusterFindings.length > 0) {\n  html += `\n    <h2>Directory Bruteforce Results</h2>\n    <div class=\"section\">`;\n  for (const finding of webRecon.gobusterFindings.slice(0, 50)) {\n    html += `<div class=\"list-item\">${finding}</div>`;\n  }\n  html += `</div>`;\n}\n\n// SSL/TLS Issues\nif (webRecon.testsslIssues && webRecon.testsslIssues.length > 0) {\n  html += `\n    <h2>SSL/TLS Security Issues</h2>\n    <table>\n      <thead><tr><th>Host</th><th>Issue</th><th>Severity</th></tr></thead>\n      <tbody>`;\n  for (const issue of webRecon.testsslIssues.slice(0, 30)) {\n    html += `<tr>\n      <td>${issue.ip || 'N/A'}</td>\n      <td>${issue.id || 'N/A'}</td>\n      <td>${severityBadge(issue.severity)}</td>\n    </tr>`;\n  }\n  html += `</tbody></table>`;\n}\n\nhtml += `\n    <h2>Nuclei Vulnerability Findings</h2>\n    <table>\n      <thead><tr><th>Template</th><th>Name</th><th>Severity</th><th>Host</th></tr></thead>\n      <tbody>`;\nfor (const finding of report.nucleiVulnerabilities.findings.slice(0, 50)) {\n  html += `<tr>\n    <td><code>${finding.templateId}</code></td>\n    <td>${finding.name}</td>\n    <td>${severityBadge(finding.severity)}</td>\n    <td>${finding.host}</td>\n  </tr>`;\n}\nhtml += `</tbody></table>\n\n    <h2>Port Scanning Results</h2>\n    <table>\n      <thead><tr><th>IP</th><th>Port</th><th>Service</th><th>Version</th></tr></thead>\n      <tbody>`;\nfor (const svc of report.portScanning.services.slice(0, 50)) {\n  html += `<tr>\n    <td>${svc.ip}</td>\n    <td><strong>${svc.port}</strong></td>\n    <td>${svc.service}</td>\n    <td>${svc.product || '-'} ${svc.version || ''}</td>\n  </tr>`;\n}\nhtml += `</tbody></table>\n\n    <h2>CVE Findings</h2>\n    <table>\n      <thead><tr><th>Service</th><th>CVE</th><th>CVSS</th><th>Description</th></tr></thead>\n      <tbody>`;\nfor (const cve of report.cveFindings.data.filter(c => c.cveId !== 'N/A').slice(0, 30)) {\n  html += `<tr>\n    <td>${cve.product} ${cve.version}</td>\n    <td><strong>${cve.cveId}</strong></td>\n    <td>${cve.cvssScore}</td>\n    <td>${cve.cveSummary.substring(0, 100)}...</td>\n  </tr>`;\n}\nhtml += `</tbody></table>\n  </div>\n</body>\n</html>`;\n\nconsole.log('✓ Enhanced bug bounty report generated');\nconst buffer = Buffer.from(html, 'utf-8');\nreturn [{\n  json: { html: html },\n  binary: { data: { data: buffer.toString('base64'), mimeType: 'text/html', fileName: 'bug_bounty_report.html' } }\n}];"
       },
       "id": "7fbbc3b6-c77e-4252-acf1-76876c7a65b9",
       "name": "Generate Comprehensive HTML Report",
@@ -326,29 +292,13 @@
     },
     {
       "parameters": {
-        "operation": "write",
-        "fileName": "={{ $json.pdfPath }}",
-        "options": {}
-      },
-      "id": "ee99cf10-a043-4d7a-89fd-40e52e603de4",
-      "name": "Save PDF Report",
-      "type": "n8n-nodes-base.readWriteFile",
-      "position": [
-        6480,
-        304
-      ],
-      "typeVersion": 1,
-      "notes": "Save the final PDF report to disk"
-    },
-    {
-      "parameters": {
         "assignments": {
           "assignments": [
             {
               "id": "preset-1",
               "name": "target",
               "type": "string",
-              "value": "example.com"
+              "value": "={{ $json.chatInput }}"
             }
           ]
         },
@@ -439,17 +389,227 @@
     },
     {
       "parameters": {
-        "jsCode": "const puppeteer = require('puppeteer');\nconst fs = require('fs');\n\nconst htmlContent = $input.first().json.html;\nconst timestamp = $('1. Set Parameters').item.json.timestamp;\nconst target = $('1. Set Parameters').item.json.target;\nconst pdfPath = `/tmp/comprehensive_report_${timestamp}.pdf`;\n\nconsole.log('=== CONVERTING HTML TO PDF ===');\n\ntry {\n  // Launch headless browser with Alpine-specific args\n  const browser = await puppeteer.launch({\n    headless: true,\n    executablePath: '/usr/bin/chromium-browser',\n    args: [\n      '--no-sandbox',\n      '--disable-setuid-sandbox',\n      '--disable-dev-shm-usage',\n      '--disable-gpu',\n      '--disable-software-rasterizer',\n      '--disable-extensions'\n    ]\n  });\n\n  const page = await browser.newPage();\n  \n  // Set content and wait for everything to load\n  await page.setContent(htmlContent, {\n    waitUntil: 'networkidle0'\n  });\n\n  // Generate PDF with proper formatting\n  await page.pdf({\n    path: pdfPath,\n    format: 'A4',\n    printBackground: true,\n    preferCSSPageSize: false,\n    margin: {\n      top: '20mm',\n      right: '15mm',\n      bottom: '20mm',\n      left: '15mm'\n    }\n  });\n\n  await browser.close();\n\n  console.log(`✓ PDF generated: ${pdfPath}`);\n  console.log(`✓ File size: ${fs.statSync(pdfPath).size} bytes`);\n\n  // Read PDF as buffer\n  const pdfBuffer = fs.readFileSync(pdfPath);\n\n  return [{\n    json: {\n      pdfPath: pdfPath,\n      target: target,\n      timestamp: timestamp,\n      filename: `attack_surface_report_${target}_${timestamp}.pdf`,\n      fileSize: fs.statSync(pdfPath).size\n    },\n    binary: {\n      data: {\n        data: pdfBuffer.toString('base64'),\n        mimeType: 'application/pdf',\n        fileName: `attack_surface_report_${target}_${timestamp}.pdf`\n      }\n    }\n  }];\n\n} catch (error) {\n  console.error('PDF conversion failed:', error.message);\n  console.error('Stack:', error.stack);\n  throw new Error(`PDF conversion failed: ${error.message}`);\n}"
+        "command": "=# Naabu - Fast port discovery\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\necho \"Running naabu fast port scan on: $target\"\n\n# Fast port discovery with naabu\nnaabu -host \"$target\" \\\n  -top-ports 1000 \\\n  -rate 1000 \\\n  -silent \\\n  -json \\\n  -o /tmp/naabu_{{ $('1. Set Parameters').item.json.timestamp }}.json\n\necho \"Naabu found $(cat /tmp/naabu_{{ $('1. Set Parameters').item.json.timestamp }}.json | wc -l) open ports\"\ncat /tmp/naabu_{{ $('1. Set Parameters').item.json.timestamp }}.json"
       },
-      "id": "pdf-converter-node",
-      "name": "Convert HTML to PDF",
+      "id": "naabu-scan-node",
+      "name": "Naabu Fast Port Discovery",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3648,
+        -672
+      ],
+      "notes": "Fast SYN scan for port discovery - feeds into nmap for detailed analysis"
+    },
+    {
+      "parameters": {
+        "command": "=# Wayback URLs - Historical endpoint discovery\necho \"Discovering historical URLs for {{ $json.count }} domains...\"\n\n# Get URLs from wayback machine for all discovered domains\ncat /tmp/all_subdomains_{{ $json.timestamp }}.txt | waybackurls > /tmp/wayback_{{ $json.timestamp }}.txt\n\necho \"Wayback found $(wc -l < /tmp/wayback_{{ $json.timestamp }}.txt) historical URLs\"\n\n# Deduplicate and filter interesting URLs\ncat /tmp/wayback_{{ $json.timestamp }}.txt | \\\n  grep -E '\\.(js|json|xml|csv|txt|log|bak|sql|zip|tar|gz|env|config)$|api/|admin/|backup/|test/|dev/|staging/' | \\\n  sort -u > /tmp/wayback_interesting_{{ $json.timestamp }}.txt\n\necho \"Found $(wc -l < /tmp/wayback_interesting_{{ $json.timestamp }}.txt) interesting URLs\"\ncat /tmp/wayback_interesting_{{ $json.timestamp }}.txt"
+      },
+      "id": "waybackurls-node",
+      "name": "Wayback URLs Discovery",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3840,
+        128
+      ],
+      "notes": "Discover historical URLs and endpoints from Wayback Machine"
+    },
+    {
+      "parameters": {
+        "command": "=# Gobuster - Directory/file discovery\necho \"Running gobuster on discovered HTTP services...\"\n\n# Create target list from httpx results\ncat /tmp/httpx_{{ $('Merge & Deduplicate Subdomains').item.json.timestamp }}.json | jq -r '.url' | head -20 > /tmp/gobuster_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\ntouch /tmp/gobuster_results_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\n# Run gobuster on top 20 targets (to save time)\nwhile IFS= read -r url; do\n  echo \"Scanning: $url\"\n  gobuster dir -u \"$url\" \\\n    -w /usr/share/wordlists/dirb/common.txt \\\n    -t 20 \\\n    -q \\\n    -k \\\n    --no-error \\\n    -o /tmp/gobuster_${url//[:.\\/]/_}.txt 2>/dev/null || true\n  \n  cat /tmp/gobuster_${url//[:.\\/]/_}.txt >> /tmp/gobuster_results_{{ $('1. Set Parameters').item.json.timestamp }}.txt 2>/dev/null || true\ndone < /tmp/gobuster_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\necho \"Gobuster scan complete\"\ncat /tmp/gobuster_results_{{ $('1. Set Parameters').item.json.timestamp }}.txt"
+      },
+      "id": "gobuster-node",
+      "name": "Gobuster Directory Bruteforce",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4592,
+        -240
+      ],
+      "notes": "Directory and file discovery using wordlist bruteforcing"
+    },
+    {
+      "parameters": {
+        "command": "=# DNSRecon - Advanced DNS enumeration\necho \"Running DNSRecon on {{ $('1. Set Parameters').item.json.target }}...\"\n\n# Try zone transfer first\ndnsrecon -d {{ $('1. Set Parameters').item.json.target }} -t axfr -j /tmp/dnsrecon_axfr_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\n\n# Standard enumeration\ndnsrecon -d {{ $('1. Set Parameters').item.json.target }} -t std -j /tmp/dnsrecon_std_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\n\n# Bruteforce subdomains\ndnsrecon -d {{ $('1. Set Parameters').item.json.target }} -t brt -D /usr/share/dnsrecon/namelist.txt -j /tmp/dnsrecon_brt_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\n\necho \"DNSRecon enumeration complete\"\ncat /tmp/dnsrecon_std_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || echo '{}'"
+      },
+      "id": "dnsrecon-node",
+      "name": "DNSRecon Advanced Enum",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2624,
+        128
+      ],
+      "notes": "Advanced DNS reconnaissance - zone transfers, bruteforce, cache snooping"
+    },
+    {
+      "parameters": {
+        "command": "=# theHarvester - OSINT data gathering\necho \"Running theHarvester on {{ $('1. Set Parameters').item.json.target }}...\"\n\n# Gather data from multiple sources\ntheHarvester -d {{ $('1. Set Parameters').item.json.target }} \\\n  -b google,bing,yahoo,duckduckgo,certspotter,crtsh,hackertarget,threatcrowd \\\n  -f /tmp/theharvester_{{ $('1. Set Parameters').item.json.timestamp }} \\\n  2>/dev/null || true\n\necho \"theHarvester OSINT complete\"\ncat /tmp/theharvester_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || cat /tmp/theharvester_{{ $('1. Set Parameters').item.json.timestamp }}.xml 2>/dev/null || echo 'No results'"
+      },
+      "id": "theharvester-node",
+      "name": "theHarvester OSINT",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2304,
+        48
+      ],
+      "notes": "OSINT gathering - emails, subdomains, IPs from multiple sources"
+    },
+    {
+      "parameters": {
+        "command": "=# TruffleHog - Secrets and credential scanning\necho \"Scanning for exposed secrets...\"\n\n# Scan wayback URLs for secrets\nif [ -f /tmp/wayback_interesting_{{ $('1. Set Parameters').item.json.timestamp }}.txt ]; then\n  echo \"Scanning wayback URLs for secrets...\"\n  \n  # Scan top 50 interesting URLs\n  head -50 /tmp/wayback_interesting_{{ $('1. Set Parameters').item.json.timestamp }}.txt | while read url; do\n    echo \"Checking: $url\"\n    trufflehog filesystem --directory=\"$url\" --json --no-verification 2>/dev/null || true\n  done > /tmp/trufflehog_{{ $('1. Set Parameters').item.json.timestamp }}.json\nfi\n\necho \"TruffleHog scan complete\"\ncat /tmp/trufflehog_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null | jq -s 'length' 2>/dev/null || echo '0'"
+      },
+      "id": "trufflehog-node",
+      "name": "TruffleHog Secrets Scanner",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4928,
+        -336
+      ],
+      "notes": "Scan discovered URLs and content for exposed secrets, API keys, credentials"
+    },
+    {
+      "parameters": {
+        "command": "=# TestSSL - SSL/TLS security assessment\necho \"Testing SSL/TLS configurations...\"\n\n# Get HTTPS hosts from httpx results\ncat /tmp/httpx_{{ $('Merge & Deduplicate Subdomains').item.json.timestamp }}.json 2>/dev/null | \\\n  jq -r 'select(.scheme==\"https\") | .host' | \\\n  head -10 > /tmp/https_hosts_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\ntouch /tmp/testssl_{{ $('1. Set Parameters').item.json.timestamp }}.json\n\n# Test top 10 HTTPS hosts\nwhile IFS= read -r host; do\n  echo \"Testing SSL on: $host\"\n  testssl.sh --jsonfile=/tmp/testssl_${host//[:.\\/]/_}.json \\\n    --quiet \\\n    --fast \\\n    \"$host\" 2>/dev/null || true\n  \n  cat /tmp/testssl_${host//[:.\\/]/_}.json >> /tmp/testssl_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\ndone < /tmp/https_hosts_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\necho \"TestSSL scan complete\"\ncat /tmp/testssl_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null | head -100"
+      },
+      "id": "testssl-node",
+      "name": "TestSSL Security Check",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4800,
+        -544
+      ],
+      "notes": "SSL/TLS configuration testing - vulnerabilities, ciphers, certificates"
+    },
+    {
+      "parameters": {
+        "command": "=# WhatWeb - Technology fingerprinting\necho \"Running WhatWeb technology detection...\"\n\n# Create URL list from httpx\ncat /tmp/httpx_{{ $json.timestamp }}.json | jq -r '.url' | head -30 > /tmp/whatweb_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\n# Run WhatWeb with aggressive scanning\nwhatweb --input-file=/tmp/whatweb_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt \\\n  --aggression 3 \\\n  --log-json=/tmp/whatweb_{{ $('1. Set Parameters').item.json.timestamp }}.json \\\n  --no-errors \\\n  2>/dev/null || true\n\necho \"WhatWeb found $(cat /tmp/whatweb_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null | wc -l) technology profiles\"\ncat /tmp/whatweb_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || echo '[]'"
+      },
+      "id": "whatweb-node",
+      "name": "WhatWeb Technology Detection",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4064,
+        -112
+      ],
+      "notes": "Deep technology fingerprinting - CMS, frameworks, servers, plugins"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse all web reconnaissance results\nconst timestamp = $('1. Set Parameters').item.json.timestamp;\nconst fs = require('fs');\n\nconsole.log('=== PARSING WEB RECON RESULTS ===');\n\nconst results = {\n  waybackUrls: [],\n  gobusterFindings: [],\n  whatwebTech: [],\n  testsslIssues: [],\n  secrets: []\n};\n\n// Parse Wayback URLs\ntry {\n  const wayback = fs.readFileSync(`/tmp/wayback_interesting_${timestamp}.txt`, 'utf8');\n  results.waybackUrls = wayback.split('\\n').filter(u => u.trim()).slice(0, 100);\n  console.log(`Wayback URLs: ${results.waybackUrls.length}`);\n} catch (e) {\n  console.log('No wayback results');\n}\n\n// Parse Gobuster findings\ntry {\n  const gobuster = fs.readFileSync(`/tmp/gobuster_results_${timestamp}.txt`, 'utf8');\n  results.gobusterFindings = gobuster.split('\\n')\n    .filter(l => l.includes('Status:'))\n    .slice(0, 100);\n  console.log(`Gobuster findings: ${results.gobusterFindings.length}`);\n} catch (e) {\n  console.log('No gobuster results');\n}\n\n// Parse WhatWeb tech\ntry {\n  const whatweb = fs.readFileSync(`/tmp/whatweb_${timestamp}.json`, 'utf8');\n  const lines = whatweb.split('\\n').filter(l => l.trim());\n  results.whatwebTech = lines.map(l => {\n    try {\n      return JSON.parse(l);\n    } catch (e) {\n      return null;\n    }\n  }).filter(t => t !== null).slice(0, 50);\n  console.log(`WhatWeb tech profiles: ${results.whatwebTech.length}`);\n} catch (e) {\n  console.log('No whatweb results');\n}\n\n// Parse TestSSL issues\ntry {\n  const testssl = fs.readFileSync(`/tmp/testssl_${timestamp}.json`, 'utf8');\n  const findings = JSON.parse(`[${testssl.replace(/\\}\\s*\\{/g, '},{')}]`);\n  results.testsslIssues = findings\n    .filter(f => f.severity && f.severity !== 'OK')\n    .slice(0, 50);\n  console.log(`TestSSL issues: ${results.testsslIssues.length}`);\n} catch (e) {\n  console.log('No testssl results');\n}\n\n// Parse Secrets\ntry {\n  const secrets = fs.readFileSync(`/tmp/trufflehog_${timestamp}.json`, 'utf8');\n  const lines = secrets.split('\\n').filter(l => l.trim());\n  results.secrets = lines.map(l => {\n    try {\n      return JSON.parse(l);\n    } catch (e) {\n      return null;\n    }\n  }).filter(s => s !== null && s.DetectorName).slice(0, 50);\n  console.log(`Secrets found: ${results.secrets.length}`);\n} catch (e) {\n  console.log('No secrets found');\n}\n\nconsole.log('✓ Web recon parsing complete');\n\nreturn [{json: {\n  webRecon: results,\n  summary: {\n    waybackUrls: results.waybackUrls.length,\n    directories: results.gobusterFindings.length,\n    technologies: results.whatwebTech.length,\n    sslIssues: results.testsslIssues.length,\n    secrets: results.secrets.length\n  }\n}}];"
+      },
+      "id": "parse-web-recon-node",
+      "name": "Parse Web Recon Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "position": [
+        5376,
+        -192
+      ],
+      "notes": "Aggregate and parse all web reconnaissance findings"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "not-ipv4",
+              "leftValue": "={{ $json.target }}",
+              "rightValue": "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+              "operator": {
+                "type": "string",
+                "operation": "notRegex"
+              }
+            },
+            {
+              "id": "has-dot-and-tld",
+              "leftValue": "={{ $json.target }}",
+              "rightValue": "^[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+\\.[a-zA-Z]{2,}$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "domain-if-node",
+      "name": "Is Target a Domain?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        304
+      ],
+      "notes": "Checks if target is a domain (not an IP). TRUE = domain path, FALSE = IP path"
+    },
+    {
+      "parameters": {
+        "command": "=# Convert HTML to PDF using html2pdf helper\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $('1. Set Parameters').item.json.target }}\"\n\nhtml_file=\"/tmp/report_${timestamp}.html\"\npdf_file=\"/tmp/bug_bounty_report_${timestamp}.pdf\"\n\necho \"=== HTML TO PDF CONVERSION ===\"\n\n# Save HTML content to temporary file\ncat > \"$html_file\" << 'HTMLEOF'\n{{ $input.first().json.html }}\nHTMLEOF\n\necho \"✓ HTML saved: $html_file ($(wc -c < $html_file) bytes)\"\n\n# Convert using html2pdf helper script\nhtml2pdf \"$html_file\" \"$pdf_file\"\n\nif [ -f \"$pdf_file\" ]; then\n  echo \"✓ PDF generated: $pdf_file ($(wc -c < $pdf_file) bytes)\"\n  \n  # Output JSON for next node\n  echo \"{\\\"pdfPath\\\":\\\"$pdf_file\\\",\\\"filename\\\":\\\"bug_bounty_report_${target}_${timestamp}.pdf\\\",\\\"target\\\":\\\"$target\\\",\\\"timestamp\\\":\\\"$timestamp\\\"}\"\nelse\n  echo \"✗ PDF generation failed\"\n  exit 1\nfi"
+      },
+      "id": "html2pdf-converter",
+      "name": "Convert HTML to PDF",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
       "position": [
         6160,
         304
       ],
-      "notes": "Convert HTML report to PDF using puppeteer"
+      "notes": "Convert HTML report to PDF using html2pdf helper script (WeasyPrint)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract JSON from stdout (last line)\nconst stdout = $input.first().json.stdout;\n\n// Get the last line which contains the JSON\nconst lines = stdout.trim().split('\\n');\nconst jsonLine = lines[lines.length - 1];\n\nconsole.log('Parsing JSON:', jsonLine);\n\nconst pdfInfo = JSON.parse(jsonLine);\n\nconsole.log('PDF Path:', pdfInfo.pdfPath);\nconsole.log('Filename:', pdfInfo.filename);\n\nreturn [{\n  json: {\n    pdfPath: pdfInfo.pdfPath,\n    filename: pdfInfo.filename,\n    target: pdfInfo.target,\n    timestamp: pdfInfo.timestamp\n  }\n}];"
+      },
+      "id": "parse-pdf-path",
+      "name": "Parse PDF Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6368,
+        304
+      ],
+      "notes": "Extract PDF path from command output"
+    },
+    {
+      "parameters": {
+        "filePath": "={{ $json.pdfPath }}"
+      },
+      "id": "read-pdf-binary",
+      "name": "Read PDF File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        6560,
+        304
+      ],
+      "notes": "Read the generated PDF as binary data"
+    },
+    {
+      "parameters": {
+        "command": "=# Copy PDF to outputs directory\nsource_pdf=\"{{ $('Parse PDF Path').first().json.pdfPath }}\"\nfilename=\"{{ $('Parse PDF Path').first().json.filename }}\"\noutput_path=\"/mnt/user-data/outputs/${filename}\"\n\necho \"Copying PDF to outputs directory...\"\ncp \"$source_pdf\" \"$output_path\"\n\nif [ -f \"$output_path\" ]; then\n  echo \"✓ PDF saved: $output_path\"\n  echo \"✓ File size: $(ls -lh $output_path | awk '{print $5}')\"\n  echo \"{\\\"outputPath\\\":\\\"$output_path\\\",\\\"filename\\\":\\\"$filename\\\"}\"\nelse\n  echo \"✗ Failed to copy PDF\"\n  exit 1\nfi"
+      },
+      "id": "copy-pdf-to-outputs",
+      "name": "Copy PDF to Outputs",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        6768,
+        304
+      ],
+      "notes": "Copy PDF file to outputs directory for download"
     }
   ],
   "pinData": {},
@@ -509,35 +669,6 @@
         ]
       ]
     },
-    "1. Set Parameters": {
-      "main": [
-        [
-          {
-            "node": "Is Target a Domain?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Is Target a Domain?": {
-      "main": [
-        [
-          {
-            "node": "Install Security Tools",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Nmap Port Scan",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Install Security Tools": {
       "main": [
         [
@@ -559,6 +690,16 @@
           },
           {
             "node": "Amass Subdomain Enum",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DNSRecon Advanced Enum",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "theHarvester OSINT",
             "type": "main",
             "index": 0
           }
@@ -592,6 +733,11 @@
         [
           {
             "node": "DNS Resolution (dig)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wayback URLs Discovery",
             "type": "main",
             "index": 0
           }
@@ -632,6 +778,16 @@
             "node": "Nuclei Vulnerability Scan",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "TestSSL Security Check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatWeb Technology Detection",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -651,14 +807,19 @@
       "main": [
         [
           {
-            "node": "Nmap Port Scan",
+            "node": "Nmap Stealth Port Scan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Naabu Fast Port Discovery",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Nmap Port Scan": {
+    "Nmap Stealth Port Scan": {
       "main": [
         [
           {
@@ -713,22 +874,6 @@
         ]
       ]
     },
-    "Generate Comprehensive HTML Report": {
-      "main": [
-        [
-          {
-            "node": "Convert HTML to PDF",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Save PDF Report": {
-      "main": [
-        []
-      ]
-    },
     "When chat message received": {
       "main": [
         [
@@ -740,11 +885,150 @@
         ]
       ]
     },
+    "Naabu Fast Port Discovery": {
+      "main": [
+        [
+          {
+            "node": "Nmap Stealth Port Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wayback URLs Discovery": {
+      "main": [
+        [
+          {
+            "node": "Gobuster Directory Bruteforce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gobuster Directory Bruteforce": {
+      "main": [
+        [
+          {
+            "node": "TruffleHog Secrets Scanner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TruffleHog Secrets Scanner": {
+      "main": [
+        [
+          {
+            "node": "Parse Web Recon Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TestSSL Security Check": {
+      "main": [
+        [
+          {
+            "node": "Parse Web Recon Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatWeb Technology Detection": {
+      "main": [
+        [
+          {
+            "node": "Parse Web Recon Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Web Recon Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare Comprehensive Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Set Parameters": {
+      "main": [
+        [
+          {
+            "node": "Is Target a Domain?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Target a Domain?": {
+      "main": [
+        [
+          {
+            "node": "Install Security Tools",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nmap Stealth Port Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Comprehensive HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Convert HTML to PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Convert HTML to PDF": {
       "main": [
         [
           {
-            "node": "Save PDF Report",
+            "node": "Parse PDF Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Path": {
+      "main": [
+        [
+          {
+            "node": "Read PDF File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read PDF File": {
+      "main": [
+        [
+          {
+            "node": "Copy PDF to Outputs",
             "type": "main",
             "index": 0
           }
@@ -758,7 +1042,7 @@
     "availableInMCP": true,
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "547194c8-5e70-4156-919c-9a7d9731197d",
+  "versionId": "fbf9e0fa-5096-467a-a458-4362a730516c",
   "meta": {
     "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
   },
