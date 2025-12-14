@@ -70,32 +70,23 @@
       "parameters": {
         "conditions": {
           "options": {
-            "caseSensitive": true,
+            "version": 2,
             "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
+            "caseSensitive": true,
+            "typeValidation": "strict"
           },
           "conditions": [
             {
-              "id": "detect-domain-1",
+              "id": "is-domain",
               "operator": {
                 "type": "string",
-                "operation": "regex"
+                "operation": "regex",
+                "rightValue": "^(?!\\d+\\.\\d+\\.\\d+\\.\\d+)([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$"
               },
-              "leftValue": "={{ $json.target }}",
-              "rightValue": "(/^(\\d{1,3}\\.){3}\\d{1,3}$/) !== null"
-            },
-            {
-              "id": "detect-domain-2",
-              "operator": {
-                "type": "string",
-                "operation": "notRegex"
-              },
-              "leftValue": "={{ $json.target }}",
-              "rightValue": "(/^([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}$/) !== null"
+              "leftValue": "={{ $json.target }}"
             }
           ],
-          "combinator": "or"
+          "combinator": "and"
         },
         "options": {}
       },
@@ -107,11 +98,11 @@
         304
       ],
       "typeVersion": 2.2,
-      "notes": "Detect if input is domain (for subdomain enum) or IP/network (direct scan)"
+      "notes": "Checks if target is a domain (not an IP). True branch = domain path (subdomain enum), False branch = IP path (direct scan)"
     },
     {
       "parameters": {
-        "command": "=# Install Security Tools\necho \"Installing security tools...\"\n\n# Install Go (required for many tools)\nif ! command -v go &> /dev/null; then\n  echo \"Installing Go...\"\n  apk add --no-cache go\nfi\n\n# Install subfinder\nif ! command -v subfinder &> /dev/null; then\n  echo \"Installing subfinder...\"\n  go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest\n  cp /root/go/bin/subfinder /usr/local/bin/\nfi\n\n# Install httpx\nif ! command -v httpx &> /dev/null; then\n  echo \"Installing httpx...\"\n  go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest\n  cp /root/go/bin/httpx /usr/local/bin/\nfi\n\n# Install nuclei\nif ! command -v nuclei &> /dev/null; then\n  echo \"Installing nuclei...\"\n  go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest\n  cp /root/go/bin/nuclei /usr/local/bin/\n  nuclei -update-templates\nfi\n\n# Install amass\nif ! command -v amass &> /dev/null; then\n  echo \"Installing amass...\"\n  go install -v github.com/owasp-amass/amass/v4/...@master\n  cp /root/go/bin/amass /usr/local/bin/\nfi\n\n# dig and whois should be pre-installed, but check\napk add --no-cache bind-tools whois curl wget\n\necho \"All tools installed successfully!\"\necho \"subfinder: $(subfinder -version 2>&1 | head -1)\"\necho \"httpx: $(httpx -version 2>&1 | head -1)\"\necho \"nuclei: $(nuclei -version 2>&1 | head -1)\"\necho \"amass: $(amass -version 2>&1 | head -1)\""
+        "command": "=# Install Security Tools\necho \"Installing security tools...\"\n\n# Install Go (required for many tools)\nif ! command -v go &> /dev/null; then\n  echo \"Installing Go...\"\n  apk add --no-cache go\nfi\n\n# Install Node.js and npm if not present (for puppeteer)\nif ! command -v node &> /dev/null; then\n  echo \"Installing Node.js...\"\n  apk add --no-cache nodejs npm chromium\nfi\n\n# Install puppeteer\nif [ ! -d \"/root/.npm-global/lib/node_modules/puppeteer\" ]; then\n  echo \"Installing puppeteer...\"\n  npm install -g puppeteer --unsafe-perm=true --allow-root\n  # Set chromium path for puppeteer\n  export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true\n  export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser\nfi\n\n# Install subfinder\nif ! command -v subfinder &> /dev/null; then\n  echo \"Installing subfinder...\"\n  go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest\n  cp /root/go/bin/subfinder /usr/local/bin/\nfi\n\n# Install httpx\nif ! command -v httpx &> /dev/null; then\n  echo \"Installing httpx...\"\n  go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest\n  cp /root/go/bin/httpx /usr/local/bin/\nfi\n\n# Install nuclei\nif ! command -v nuclei &> /dev/null; then\n  echo \"Installing nuclei...\"\n  go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest\n  cp /root/go/bin/nuclei /usr/local/bin/\n  nuclei -update-templates\nfi\n\n# Install amass\nif ! command -v amass &> /dev/null; then\n  echo \"Installing amass...\"\n  go install -v github.com/owasp-amass/amass/v4/...@master\n  cp /root/go/bin/amass /usr/local/bin/\nfi\n\n# dig and whois should be pre-installed, but check\napk add --no-cache bind-tools whois curl wget\n\necho \"All tools installed successfully!\"\necho \"subfinder: $(subfinder -version 2>&1 | head -1)\"\necho \"httpx: $(httpx -version 2>&1 | head -1)\"\necho \"nuclei: $(nuclei -version 2>&1 | head -1)\"\necho \"amass: $(amass -version 2>&1 | head -1)\"\necho \"node: $(node --version)\"\necho \"chromium: $(chromium-browser --version)\""
       },
       "id": "86ff4f3c-a467-43f8-9845-1e3475b4e94b",
       "name": "Install Security Tools",
@@ -121,7 +112,7 @@
         80
       ],
       "typeVersion": 1,
-      "notes": "Install subfinder, httpx, nuclei, amass, dig, whois"
+      "notes": "Install subfinder, httpx, nuclei, amass, dig, whois, and puppeteer for PDF generation"
     },
     {
       "parameters": {
@@ -336,47 +327,18 @@
     {
       "parameters": {
         "operation": "write",
-        "fileName": "=/tmp/comprehensive_report_{{ $('1. Set Parameters').item.json.timestamp }}.html",
-        "dataPropertyName": "=data",
+        "fileName": "={{ $json.pdfPath }}",
         "options": {}
       },
       "id": "ee99cf10-a043-4d7a-89fd-40e52e603de4",
-      "name": "Save HTML Report",
+      "name": "Save PDF Report",
       "type": "n8n-nodes-base.readWriteFile",
-      "position": [
-        6160,
-        304
-      ],
-      "typeVersion": 1
-    },
-    {
-      "parameters": {
-        "command": "=# Install PrinceXML and convert to PDF\napk add wget\ncd /tmp\n\nif [ ! -f prince-16.1-alpine3.20-x86_64.tar.gz ]; then\n  wget https://www.princexml.com/download/prince-16.1-alpine3.20-x86_64.tar.gz\n  tar -xf prince-16.1-alpine3.20-x86_64.tar.gz\nfi\n\n/tmp/prince-16.1-alpine3.20-x86_64/lib/prince/bin/prince /tmp/comprehensive_report_{{ $('1. Set Parameters').item.json.timestamp }}.html -o /tmp/comprehensive_report_{{ $('1. Set Parameters').item.json.timestamp }}.pdf --media=print --encrypt --user-password={{ $('1. Set Parameters').item.json.report_password }} --css-dpi=128\n\necho \"PDF report generated successfully\""
-      },
-      "id": "d0c756f2-a1d1-446b-885e-7b270c5e3807",
-      "name": "Convert to Password-Protected PDF",
-      "type": "n8n-nodes-base.executeCommand",
       "position": [
         6480,
         304
       ],
-      "typeVersion": 1
-    },
-    {
-      "parameters": {
-        "fileSelector": "=/tmp/comprehensive_report_{{ $('1. Set Parameters').item.json.timestamp }}.pdf",
-        "options": {
-          "dataPropertyName": "=report"
-        }
-      },
-      "id": "29b10732-7e7f-411b-853d-fc6b80b38f91",
-      "name": "Read Final PDF Report",
-      "type": "n8n-nodes-base.readWriteFile",
-      "position": [
-        6800,
-        304
-      ],
-      "typeVersion": 1
+      "typeVersion": 1,
+      "notes": "Save the final PDF report to disk"
     },
     {
       "parameters": {
@@ -460,6 +422,34 @@
         0
       ],
       "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        784,
+        320
+      ],
+      "id": "bd9d5f8d-d19a-447c-8720-5ee0c3ecfbbf",
+      "name": "When chat message received",
+      "webhookId": "5ac850b4-1c6a-439e-8344-c9ad7f824b96"
+    },
+    {
+      "parameters": {
+        "jsCode": "const puppeteer = require('puppeteer');\nconst fs = require('fs');\n\nconst htmlContent = $input.first().json.html;\nconst timestamp = $('1. Set Parameters').item.json.timestamp;\nconst target = $('1. Set Parameters').item.json.target;\nconst pdfPath = `/tmp/comprehensive_report_${timestamp}.pdf`;\n\nconsole.log('=== CONVERTING HTML TO PDF ===');\n\ntry {\n  // Launch headless browser with Alpine-specific args\n  const browser = await puppeteer.launch({\n    headless: true,\n    executablePath: '/usr/bin/chromium-browser',\n    args: [\n      '--no-sandbox',\n      '--disable-setuid-sandbox',\n      '--disable-dev-shm-usage',\n      '--disable-gpu',\n      '--disable-software-rasterizer',\n      '--disable-extensions'\n    ]\n  });\n\n  const page = await browser.newPage();\n  \n  // Set content and wait for everything to load\n  await page.setContent(htmlContent, {\n    waitUntil: 'networkidle0'\n  });\n\n  // Generate PDF with proper formatting\n  await page.pdf({\n    path: pdfPath,\n    format: 'A4',\n    printBackground: true,\n    preferCSSPageSize: false,\n    margin: {\n      top: '20mm',\n      right: '15mm',\n      bottom: '20mm',\n      left: '15mm'\n    }\n  });\n\n  await browser.close();\n\n  console.log(`✓ PDF generated: ${pdfPath}`);\n  console.log(`✓ File size: ${fs.statSync(pdfPath).size} bytes`);\n\n  // Read PDF as buffer\n  const pdfBuffer = fs.readFileSync(pdfPath);\n\n  return [{\n    json: {\n      pdfPath: pdfPath,\n      target: target,\n      timestamp: timestamp,\n      filename: `attack_surface_report_${target}_${timestamp}.pdf`,\n      fileSize: fs.statSync(pdfPath).size\n    },\n    binary: {\n      data: {\n        data: pdfBuffer.toString('base64'),\n        mimeType: 'application/pdf',\n        fileName: `attack_surface_report_${target}_${timestamp}.pdf`\n      }\n    }\n  }];\n\n} catch (error) {\n  console.error('PDF conversion failed:', error.message);\n  console.error('Stack:', error.stack);\n  throw new Error(`PDF conversion failed: ${error.message}`);\n}"
+      },
+      "id": "pdf-converter-node",
+      "name": "Convert HTML to PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6160,
+        304
+      ],
+      "notes": "Convert HTML report to PDF using puppeteer"
     }
   ],
   "pinData": {},
@@ -727,29 +717,34 @@
       "main": [
         [
           {
-            "node": "Save HTML Report",
+            "node": "Convert HTML to PDF",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Save HTML Report": {
+    "Save PDF Report": {
+      "main": [
+        []
+      ]
+    },
+    "When chat message received": {
       "main": [
         [
           {
-            "node": "Convert to Password-Protected PDF",
+            "node": "Pre-Set-Target",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Convert to Password-Protected PDF": {
+    "Convert HTML to PDF": {
       "main": [
         [
           {
-            "node": "Read Final PDF Report",
+            "node": "Save PDF Report",
             "type": "main",
             "index": 0
           }
@@ -757,11 +752,13 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "a3d79efe-0c93-43c8-8009-38604816a25b",
+  "versionId": "547194c8-5e70-4156-919c-9a7d9731197d",
   "meta": {
     "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
   },
