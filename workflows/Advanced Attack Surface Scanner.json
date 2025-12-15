@@ -96,7 +96,7 @@
     },
     {
       "parameters": {
-        "command": "=# Subfinder - Fast subdomain enumeration\necho \"Running subfinder on {{ $('1. Set Parameters').item.json.target }}...\"\nsubfinder -d {{ $('1. Set Parameters').item.json.target }} -all -recursive -silent -o /tmp/subfinder_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\necho \"Subfinder found $(wc -l < /tmp/subfinder_{{ $('1. Set Parameters').item.json.timestamp }}.txt) subdomains\"\ncat /tmp/subfinder_{{ $('1. Set Parameters').item.json.timestamp }}.txt"
+        "command": "=# Subfinder - Fast subdomain enumeration\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $('1. Set Parameters').item.json.target }}\"\n\necho \"Running subfinder on $target...\"\nsubfinder -d \"$target\" -all -recursive -silent -o /tmp/subfinder_${timestamp}.txt\n\ncount=$(wc -l < /tmp/subfinder_${timestamp}.txt 2>/dev/null || echo 0)\necho \"Subfinder found $count subdomains\"\n\nif [ -f /tmp/subfinder_${timestamp}.txt ]; then\n  cat /tmp/subfinder_${timestamp}.txt\nfi"
       },
       "id": "18025e2e-2934-442b-aec3-034849ac7ee0",
       "name": "Subfinder Subdomain Enum",
@@ -110,7 +110,7 @@
     },
     {
       "parameters": {
-        "command": "=# Amass - Comprehensive subdomain enumeration\necho \"Running amass on {{ $('1. Set Parameters').item.json.target }}...\"\namass enum -passive -d {{ $('1. Set Parameters').item.json.target }} -o /tmp/amass_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\necho \"Amass found $(wc -l < /tmp/amass_{{ $('1. Set Parameters').item.json.timestamp }}.txt) subdomains\"\ncat /tmp/amass_{{ $('1. Set Parameters').item.json.timestamp }}.txt"
+        "command": "=# Amass - Comprehensive subdomain enumeration\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $('1. Set Parameters').item.json.target }}\"\n\necho \"Running amass on $target...\"\namass enum -passive -d \"$target\" -o /tmp/amass_${timestamp}.txt 2>/dev/null || touch /tmp/amass_${timestamp}.txt\n\ncount=$(wc -l < /tmp/amass_${timestamp}.txt 2>/dev/null || echo 0)\necho \"Amass found $count subdomains\"\n\nif [ -f /tmp/amass_${timestamp}.txt ]; then\n  cat /tmp/amass_${timestamp}.txt\nfi"
       },
       "id": "271042c0-e5f3-4a85-95e6-56b4f6b5352c",
       "name": "Amass Subdomain Enum",
@@ -124,21 +124,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Merge and deduplicate subdomains from subfinder and amass\nconst subfinderOutput = $input.first().json.stdout || '';\nconst amassOutput = $input.last().json.stdout || '';\n\nconst timestamp = $('1. Set Parameters').item.json.timestamp;\n\nconsole.log('=== MERGING SUBDOMAIN RESULTS ===');\n\n// Parse subdomains\nconst subfinderDomains = subfinderOutput.split('\\n').filter(d => d.trim());\nconst amassDomains = amassOutput.split('\\n').filter(d => d.trim());\n\nconsole.log(`Subfinder: ${subfinderDomains.length} domains`);\nconsole.log(`Amass: ${amassDomains.length} domains`);\n\n// Merge and deduplicate\nconst allDomains = [...new Set([...subfinderDomains, ...amassDomains])];\nconst uniqueDomains = allDomains.filter(d => {\n  // Basic validation - must be valid domain format\n  return d.match(/^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]\\.[a-zA-Z]{2,}$/);\n});\n\nconsole.log(`Total unique subdomains: ${uniqueDomains.length}`);\n\n// Save to file\nconst fs = require('fs');\nfs.writeFileSync(`/tmp/all_subdomains_${timestamp}.txt`, uniqueDomains.join('\\n'));\n\nreturn [{json: {\n  subdomains: uniqueDomains,\n  count: uniqueDomains.length,\n  timestamp: timestamp\n}}];"
-      },
-      "id": "c43ee1e0-d8dd-4834-a41c-9a789bc5698a",
-      "name": "Merge & Deduplicate Subdomains",
-      "type": "n8n-nodes-base.code",
-      "position": [
-        2912,
-        -128
-      ],
-      "typeVersion": 2,
-      "notes": "Combine results from subfinder and amass"
-    },
-    {
-      "parameters": {
-        "command": "=# DNS Resolution with dig\necho \"Resolving {{ $json.count }} subdomains to IP addresses...\"\n\n# Read subdomains and resolve each\nwhile IFS= read -r domain; do\n  if [ -n \"$domain\" ]; then\n    ip=$(dig +short \"$domain\" A | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' | head -1)\n    if [ -n \"$ip\" ]; then\n      echo \"${domain}|${ip}\"\n    fi\n  fi\ndone < /tmp/all_subdomains_{{ $json.timestamp }}.txt > /tmp/resolved_{{ $json.timestamp }}.txt\n\necho \"Resolved $(wc -l < /tmp/resolved_{{ $json.timestamp }}.txt) domains to IPs\"\ncat /tmp/resolved_{{ $json.timestamp }}.txt"
+        "command": "=# DNS Resolution with dig\n# Parse JSON from previous node\ntimestamp=$(echo '{{ $json.stdout }}' | grep -o '\"timestamp\":\"[^\"]*\"' | cut -d'\"' -f4)\ncount=$(echo '{{ $json.stdout }}' | grep -o '\"count\":[0-9]*' | cut -d':' -f2)\n\necho \"=== DNS RESOLUTION ===\"\necho \"Timestamp: $timestamp\"\necho \"Resolving $count subdomains to IP addresses...\"\n\nif [ ! -f \"/tmp/all_subdomains_${timestamp}.txt\" ]; then\n  echo \"Error: /tmp/all_subdomains_${timestamp}.txt not found\"\n  exit 1\nfi\n\n# Read subdomains and resolve each\nwhile IFS= read -r domain; do\n  if [ -n \"$domain\" ]; then\n    ip=$(dig +short \"$domain\" A | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' | head -1)\n    if [ -n \"$ip\" ]; then\n      echo \"${domain}|${ip}\"\n    fi\n  fi\ndone < /tmp/all_subdomains_${timestamp}.txt > /tmp/resolved_${timestamp}.txt\n\nresolved_count=$(wc -l < /tmp/resolved_${timestamp}.txt)\necho \"Resolved $resolved_count domains to IPs\"\ncat /tmp/resolved_${timestamp}.txt\n\n# Output JSON for next node\necho \"{\\\"timestamp\\\":\\\"$timestamp\\\",\\\"count\\\":$resolved_count}\""
       },
       "id": "a62a4e5a-5a87-4fd0-8fb1-e0802ad4c463",
       "name": "DNS Resolution (dig)",
@@ -180,7 +166,7 @@
     },
     {
       "parameters": {
-        "command": "=# Get unique IPs for nmap scanning\ncat /tmp/resolved_{{ $('Merge & Deduplicate Subdomains').item.json.timestamp }}.txt | cut -d'|' -f2 | sort -u > /tmp/target_ips_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\necho \"Unique IPs to scan: $(wc -l < /tmp/target_ips_{{ $('1. Set Parameters').item.json.timestamp }}.txt)\"\ncat /tmp/target_ips_{{ $('1. Set Parameters').item.json.timestamp }}.txt | tr '\\n' ',' | sed 's/,$/\\n/'"
+        "command": "=# Get unique IPs for nmap scanning\n# Parse timestamp from DNS Resolution output\ntimestamp=$(echo '{{ $json.stdout }}' | grep -o '\"timestamp\":\"[^\"]*\"' | cut -d'\"' -f4)\n\necho \"=== EXTRACTING UNIQUE IPs ===\"\necho \"Timestamp: $timestamp\"\n\nif [ ! -f \"/tmp/resolved_${timestamp}.txt\" ]; then\n  echo \"Warning: /tmp/resolved_${timestamp}.txt not found\"\n  echo \"No IPs to scan\"\n  exit 0\nfi\n\n# Extract IPs from domain|ip format\ncat /tmp/resolved_${timestamp}.txt | cut -d'|' -f2 | sort -u > /tmp/target_ips_${timestamp}.txt\n\nip_count=$(wc -l < /tmp/target_ips_${timestamp}.txt)\necho \"Unique IPs to scan: $ip_count\"\n\n# Output comma-separated list for nmap\nif [ $ip_count -gt 0 ]; then\n  cat /tmp/target_ips_${timestamp}.txt | tr '\\n' ',' | sed 's/,$//'\nelse\n  echo \"No IPs found\"\nfi"
       },
       "id": "046eaf9d-4d4b-42a8-9453-ebaec5eb2f7a",
       "name": "Extract Unique IPs",
@@ -194,7 +180,7 @@
     },
     {
       "parameters": {
-        "command": "=# Nmap Stealth Scan - Bug Bounty Safe\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\necho \"Running stealth nmap scan on: $target\"\n\n# Use top 1000 ports only, stealth timing, less aggressive\nnmap -Pn -sT -sV --version-intensity 2 \\\n  --top-ports 1000 \\\n  -T3 --max-parallelism 20 --max-retries 1 \\\n  --scan-delay 100ms \\\n  -oX /tmp/nmap_{{ $('1. Set Parameters').item.json.timestamp }}.xml \"$target\"\n\ncat /tmp/nmap_{{ $('1. Set Parameters').item.json.timestamp }}.xml"
+        "command": "=# Nmap Stealth Scan - Bug Bounty Safe\n# Get target from Extract Unique IPs output\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\n\necho \"=== NMAP STEALTH PORT SCAN ===\"\necho \"Target: $target\"\n\n# Clean up \"No IPs found\" or empty targets\nif [ -z \"$target\" ] || [ \"$target\" = \"No IPs found\" ] || [ \"$target\" = \"No IPs to scan\" ]; then\n  echo \"No targets to scan\"\n  exit 0\nfi\n\n# Use top 1000 ports only, stealth timing, less aggressive\nnmap -Pn -sT -sV --version-intensity 2 \\\n  --top-ports 1000 \\\n  -T3 --max-parallelism 20 --max-retries 1 \\\n  --scan-delay 100ms \\\n  -oX /tmp/nmap_${timestamp}.xml \"$target\"\n\nif [ -f /tmp/nmap_${timestamp}.xml ]; then\n  echo \"Nmap scan complete\"\n  cat /tmp/nmap_${timestamp}.xml\nelse\n  echo \"Nmap scan failed\"\n  exit 1\nfi"
       },
       "id": "a03e65eb-17f5-4d9f-b414-13b040ad07e4",
       "name": "Nmap Stealth Port Scan",
@@ -389,7 +375,7 @@
     },
     {
       "parameters": {
-        "command": "=# Naabu - Fast port discovery\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\necho \"Running naabu fast port scan on: $target\"\n\n# Fast port discovery with naabu\nnaabu -host \"$target\" \\\n  -top-ports 1000 \\\n  -rate 1000 \\\n  -silent \\\n  -json \\\n  -o /tmp/naabu_{{ $('1. Set Parameters').item.json.timestamp }}.json\n\necho \"Naabu found $(cat /tmp/naabu_{{ $('1. Set Parameters').item.json.timestamp }}.json | wc -l) open ports\"\ncat /tmp/naabu_{{ $('1. Set Parameters').item.json.timestamp }}.json"
+        "command": "=# Naabu - Fast port discovery (optional, skip if not available)\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget_ips=\"{{ $json.stdout }}\"\n\necho \"=== NAABU PORT DISCOVERY ===\"\n\n# Check if naabu is available\nif ! command -v naabu &> /dev/null; then\n  echo \"Naabu not available, skipping fast port discovery\"\n  echo \"Will proceed directly to nmap\"\n  exit 0\nfi\n\n# Check if we have IPs to scan\nif [ -z \"$target_ips\" ] || [ \"$target_ips\" = \"No IPs found\" ]; then\n  echo \"No IPs to scan\"\n  exit 0\nfi\n\necho \"Running naabu on: $target_ips\"\n\n# Fast port discovery with naabu\necho \"$target_ips\" | tr ',' '\\n' | naabu \\\n  -top-ports 1000 \\\n  -rate 1000 \\\n  -silent \\\n  -json \\\n  -o /tmp/naabu_${timestamp}.json 2>/dev/null || echo \"Naabu scan failed, continuing...\"\n\nif [ -f /tmp/naabu_${timestamp}.json ]; then\n  port_count=$(cat /tmp/naabu_${timestamp}.json | wc -l)\n  echo \"Naabu found $port_count open ports\"\n  cat /tmp/naabu_${timestamp}.json\nelse\n  echo \"No naabu results, will use nmap instead\"\nfi"
       },
       "id": "naabu-scan-node",
       "name": "Naabu Fast Port Discovery",
@@ -403,7 +389,7 @@
     },
     {
       "parameters": {
-        "command": "=# Wayback URLs - Historical endpoint discovery\necho \"Discovering historical URLs for {{ $json.count }} domains...\"\n\n# Get URLs from wayback machine for all discovered domains\ncat /tmp/all_subdomains_{{ $json.timestamp }}.txt | waybackurls > /tmp/wayback_{{ $json.timestamp }}.txt\n\necho \"Wayback found $(wc -l < /tmp/wayback_{{ $json.timestamp }}.txt) historical URLs\"\n\n# Deduplicate and filter interesting URLs\ncat /tmp/wayback_{{ $json.timestamp }}.txt | \\\n  grep -E '\\.(js|json|xml|csv|txt|log|bak|sql|zip|tar|gz|env|config)$|api/|admin/|backup/|test/|dev/|staging/' | \\\n  sort -u > /tmp/wayback_interesting_{{ $json.timestamp }}.txt\n\necho \"Found $(wc -l < /tmp/wayback_interesting_{{ $json.timestamp }}.txt) interesting URLs\"\ncat /tmp/wayback_interesting_{{ $json.timestamp }}.txt"
+        "command": "=# Wayback URLs - Historical endpoint discovery\n# Parse JSON from merge node\ntimestamp=$(echo '{{ $json.stdout }}' | grep -o '\"timestamp\":\"[^\"]*\"' | cut -d'\"' -f4)\ncount=$(echo '{{ $json.stdout }}' | grep -o '\"count\":[0-9]*' | cut -d':' -f2)\n\necho \"Discovering historical URLs for $count domains...\"\n\nif [ ! -f \"/tmp/all_subdomains_${timestamp}.txt\" ]; then\n  echo \"Warning: /tmp/all_subdomains_${timestamp}.txt not found, skipping wayback\"\n  touch /tmp/wayback_interesting_${timestamp}.txt\n  exit 0\nfi\n\n# Get URLs from wayback machine for all discovered domains\ncat /tmp/all_subdomains_${timestamp}.txt | waybackurls > /tmp/wayback_${timestamp}.txt\n\necho \"Wayback found $(wc -l < /tmp/wayback_${timestamp}.txt) historical URLs\"\n\n# Deduplicate and filter interesting URLs\ncat /tmp/wayback_${timestamp}.txt | \\\n  grep -E '\\.(js|json|xml|csv|txt|log|bak|sql|zip|tar|gz|env|config)$|api/|admin/|backup/|test/|dev/|staging/' | \\\n  sort -u > /tmp/wayback_interesting_${timestamp}.txt\n\necho \"Found $(wc -l < /tmp/wayback_interesting_${timestamp}.txt) interesting URLs\"\ncat /tmp/wayback_interesting_${timestamp}.txt"
       },
       "id": "waybackurls-node",
       "name": "Wayback URLs Discovery",
@@ -452,8 +438,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        2304,
-        48
+        2544,
+        272
       ],
       "notes": "OSINT gathering - emails, subdomains, IPs from multiple sources"
     },
@@ -519,7 +505,8 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "strict",
+            "version": 1
           },
           "conditions": [
             {
@@ -532,9 +519,9 @@
               }
             },
             {
-              "id": "has-dot-and-tld",
+              "id": "is-domain",
               "leftValue": "={{ $json.target }}",
-              "rightValue": "^[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+\\.[a-zA-Z]{2,}$",
+              "rightValue": "^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\\.([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\\.)*[a-zA-Z]{2,}$",
               "operator": {
                 "type": "string",
                 "operation": "regex"
@@ -585,31 +572,65 @@
     },
     {
       "parameters": {
-        "filePath": "={{ $json.pdfPath }}"
+        "command": "=# Merge and deduplicate subdomains from ALL sources\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\n\necho \"=== MERGING SUBDOMAIN RESULTS FROM ALL TOOLS ===\"\n\n# Extract subdomains from DNSRecon JSON\nif [ -f /tmp/dnsrecon_std_${timestamp}.json ]; then\n  cat /tmp/dnsrecon_std_${timestamp}.json 2>/dev/null | \\\n    jq -r '.[] | select(.type==\"A\" or .type==\"CNAME\") | .name' 2>/dev/null \\\n    > /tmp/dnsrecon_domains_${timestamp}.txt || touch /tmp/dnsrecon_domains_${timestamp}.txt\nelse\n  touch /tmp/dnsrecon_domains_${timestamp}.txt\nfi\n\n# Extract subdomains from theHarvester\nif [ -f /tmp/theharvester_${timestamp}.json ]; then\n  cat /tmp/theharvester_${timestamp}.json 2>/dev/null | \\\n    jq -r '.hosts[]?, .emails[]? | select(. != null)' 2>/dev/null | \\\n    cut -d'@' -f2 2>/dev/null \\\n    > /tmp/theharvester_domains_${timestamp}.txt || touch /tmp/theharvester_domains_${timestamp}.txt\nelse\n  touch /tmp/theharvester_domains_${timestamp}.txt\nfi\n\n# Combine ALL sources: subfinder, amass, dnsrecon, theharvester\ncat /tmp/subfinder_${timestamp}.txt \\\n    /tmp/amass_${timestamp}.txt \\\n    /tmp/dnsrecon_domains_${timestamp}.txt \\\n    /tmp/theharvester_domains_${timestamp}.txt 2>/dev/null | \\\n  sort -u | \\\n  grep -E '^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]\\.[a-zA-Z]{2,}$' \\\n  > /tmp/all_subdomains_${timestamp}.txt\n\nsubfinder_count=$(wc -l < /tmp/subfinder_${timestamp}.txt 2>/dev/null || echo 0)\namass_count=$(wc -l < /tmp/amass_${timestamp}.txt 2>/dev/null || echo 0)\ndnsrecon_count=$(wc -l < /tmp/dnsrecon_domains_${timestamp}.txt 2>/dev/null || echo 0)\ntheharvester_count=$(wc -l < /tmp/theharvester_domains_${timestamp}.txt 2>/dev/null || echo 0)\ntotal_count=$(wc -l < /tmp/all_subdomains_${timestamp}.txt)\n\necho \"Subfinder: $subfinder_count domains\"\necho \"Amass: $amass_count domains\"\necho \"DNSRecon: $dnsrecon_count domains\"\necho \"theHarvester: $theharvester_count domains\"\necho \"Total unique subdomains: $total_count\"\n\n# Output JSON for next node\ncat << JSONEOF\n{\"count\":$total_count,\"timestamp\":\"$timestamp\"}\nJSONEOF"
       },
-      "id": "read-pdf-binary",
-      "name": "Read PDF File",
-      "type": "n8n-nodes-base.readBinaryFile",
+      "id": "merge-subdomains-bash",
+      "name": "Merge & Deduplicate Subdomains",
+      "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
+      "position": [
+        2912,
+        -128
+      ],
+      "notes": "Combine results from subfinder and amass using bash"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "pdf-path",
+              "name": "pdfPath",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.pdfPath }}"
+            },
+            {
+              "id": "filename",
+              "name": "filename",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.filename }}"
+            },
+            {
+              "id": "target",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.target }}"
+            },
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.timestamp }}"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "type": "string",
+              "value": "=Scan complete! PDF report generated: {{ $('Parse PDF Path').first().json.filename }}. Located at: {{ $('Parse PDF Path').first().json.pdfPath }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "final-report-output",
+      "name": "Report Complete",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
         6560,
         304
       ],
-      "notes": "Read the generated PDF as binary data"
-    },
-    {
-      "parameters": {
-        "command": "=# Copy PDF to outputs directory\nsource_pdf=\"{{ $('Parse PDF Path').first().json.pdfPath }}\"\nfilename=\"{{ $('Parse PDF Path').first().json.filename }}\"\noutput_path=\"/mnt/user-data/outputs/${filename}\"\n\necho \"Copying PDF to outputs directory...\"\ncp \"$source_pdf\" \"$output_path\"\n\nif [ -f \"$output_path\" ]; then\n  echo \"✓ PDF saved: $output_path\"\n  echo \"✓ File size: $(ls -lh $output_path | awk '{print $5}')\"\n  echo \"{\\\"outputPath\\\":\\\"$output_path\\\",\\\"filename\\\":\\\"$filename\\\"}\"\nelse\n  echo \"✗ Failed to copy PDF\"\n  exit 1\nfi"
-      },
-      "id": "copy-pdf-to-outputs",
-      "name": "Copy PDF to Outputs",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        6768,
-        304
-      ],
-      "notes": "Copy PDF file to outputs directory for download"
+      "notes": "Final output with PDF location"
     }
   ],
   "pinData": {},
@@ -700,44 +721,6 @@
           },
           {
             "node": "theHarvester OSINT",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Subfinder Subdomain Enum": {
-      "main": [
-        [
-          {
-            "node": "Merge & Deduplicate Subdomains",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Amass Subdomain Enum": {
-      "main": [
-        [
-          {
-            "node": "Merge & Deduplicate Subdomains",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge & Deduplicate Subdomains": {
-      "main": [
-        [
-          {
-            "node": "DNS Resolution (dig)",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Wayback URLs Discovery",
             "type": "main",
             "index": 0
           }
@@ -1013,22 +996,71 @@
         ]
       ]
     },
-    "Parse PDF Path": {
+    "Subfinder Subdomain Enum": {
       "main": [
         [
           {
-            "node": "Read PDF File",
+            "node": "Merge & Deduplicate Subdomains",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Read PDF File": {
+    "Amass Subdomain Enum": {
       "main": [
         [
           {
-            "node": "Copy PDF to Outputs",
+            "node": "Merge & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge & Deduplicate Subdomains": {
+      "main": [
+        [
+          {
+            "node": "DNS Resolution (dig)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wayback URLs Discovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DNSRecon Advanced Enum": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "theHarvester OSINT": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Path": {
+      "main": [
+        [
+          {
+            "node": "Report Complete",
             "type": "main",
             "index": 0
           }
@@ -1042,7 +1074,7 @@
     "availableInMCP": true,
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "fbf9e0fa-5096-467a-a458-4362a730516c",
+  "versionId": "2dd37852-1cbb-4363-94c0-d83b62e682ce",
   "meta": {
     "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
   },
