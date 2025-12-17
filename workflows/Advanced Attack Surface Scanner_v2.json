@@ -1,0 +1,1083 @@
+{
+  "name": "Advanced Attack Surface Scanner",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vuln-scan",
+        "options": {
+          "responseData": "Advanced scan started! This includes: subdomain enumeration, port scanning, HTTP probing, and vulnerability assessment."
+        }
+      },
+      "id": "b3421b75-dcaa-4c93-8ec3-7b656724416d",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        1152,
+        16
+      ],
+      "webhookId": "19674e38-c84a-48b4-b653-63d37406c403",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {},
+      "id": "243043c0-d3da-4809-b45c-81b629733319",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        816,
+        592
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $json.target }}"
+            },
+            {
+              "id": "2",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.format('yyyyMMdd_HHmmss') }}"
+            },
+            {
+              "id": "0a15fc2e-83fa-4f10-bfc4-5031a2b3381c",
+              "name": "report_password",
+              "type": "string",
+              "value": "test"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d62b0e65-7798-4fbc-8804-e11fa193ad23",
+      "name": "1. Set Parameters",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1456,
+        304
+      ],
+      "typeVersion": 3.3,
+      "notes": "Configure scan parameters and timestamp"
+    },
+    {
+      "parameters": {
+        "command": "=# Install Security Tools\necho \"Installing security tools...\"\n\n# Install Go (required for many tools)\nif ! command -v go &> /dev/null; then\n  echo \"Installing Go...\"\n  apk add --no-cache go\nfi\n\n# Install Node.js and npm if not present (for puppeteer)\nif ! command -v node &> /dev/null; then\n  echo \"Installing Node.js...\"\n  apk add --no-cache nodejs npm chromium\nfi\n\n# Install puppeteer\nif [ ! -d \"/root/.npm-global/lib/node_modules/puppeteer\" ]; then\n  echo \"Installing puppeteer...\"\n  npm install -g puppeteer --unsafe-perm=true --allow-root\n  # Set chromium path for puppeteer\n  export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true\n  export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser\nfi\n\n# Install subfinder\nif ! command -v subfinder &> /dev/null; then\n  echo \"Installing subfinder...\"\n  go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest\n  cp /root/go/bin/subfinder /usr/local/bin/\nfi\n\n# Install httpx\nif ! command -v httpx &> /dev/null; then\n  echo \"Installing httpx...\"\n  go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest\n  cp /root/go/bin/httpx /usr/local/bin/\nfi\n\n# Install nuclei\nif ! command -v nuclei &> /dev/null; then\n  echo \"Installing nuclei...\"\n  go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest\n  cp /root/go/bin/nuclei /usr/local/bin/\n  nuclei -update-templates\nfi\n\n# Install amass\nif ! command -v amass &> /dev/null; then\n  echo \"Installing amass...\"\n  go install -v github.com/owasp-amass/amass/v4/...@master\n  cp /root/go/bin/amass /usr/local/bin/\nfi\n\n# dig and whois should be pre-installed, but check\napk add --no-cache bind-tools whois curl wget\n\necho \"All tools installed successfully!\"\necho \"subfinder: $(subfinder -version 2>&1 | head -1)\"\necho \"httpx: $(httpx -version 2>&1 | head -1)\"\necho \"nuclei: $(nuclei -version 2>&1 | head -1)\"\necho \"amass: $(amass -version 2>&1 | head -1)\"\necho \"node: $(node --version)\"\necho \"chromium: $(chromium-browser --version)\""
+      },
+      "id": "86ff4f3c-a467-43f8-9845-1e3475b4e94b",
+      "name": "Install Security Tools",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        1984,
+        -112
+      ],
+      "typeVersion": 1,
+      "notes": "Install all bug bounty tools: subfinder, amass, httpx, nuclei, naabu, gobuster, waybackurls, whatweb, testssl, theHarvester, dnsrecon, trufflehog, and puppeteer"
+    },
+    {
+      "parameters": {
+        "command": "=# Whois Lookup for Domain Intelligence\nwhois {{ $('1. Set Parameters').item.json.target }} > /tmp/whois_{{ $('1. Set Parameters').item.json.timestamp }}.txt\ncat /tmp/whois_{{ $('1. Set Parameters').item.json.timestamp }}.txt"
+      },
+      "id": "c7eab7cc-95c6-425a-8983-0b691bab532f",
+      "name": "Whois Lookup",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        2304,
+        -112
+      ],
+      "typeVersion": 1,
+      "notes": "Gather domain registration and ownership info"
+    },
+    {
+      "parameters": {
+        "command": "=# Subfinder - Fast subdomain enumeration\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $('1. Set Parameters').item.json.target }}\"\n\necho \"Running subfinder on $target...\"\nsubfinder -d \"$target\" -all -recursive -silent -o /tmp/subfinder_${timestamp}.txt\n\ncount=$(wc -l < /tmp/subfinder_${timestamp}.txt 2>/dev/null || echo 0)\necho \"Subfinder found $count subdomains\"\n\nif [ -f /tmp/subfinder_${timestamp}.txt ]; then\n  cat /tmp/subfinder_${timestamp}.txt\nfi"
+      },
+      "id": "18025e2e-2934-442b-aec3-034849ac7ee0",
+      "name": "Subfinder Subdomain Enum",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        2640,
+        -240
+      ],
+      "typeVersion": 1,
+      "notes": "Fast subdomain discovery using multiple sources"
+    },
+    {
+      "parameters": {
+        "command": "=# Amass - Comprehensive subdomain enumeration\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $('1. Set Parameters').item.json.target }}\"\n\necho \"Running amass on $target...\"\namass enum -passive -d \"$target\" -o /tmp/amass_${timestamp}.txt 2>/dev/null || touch /tmp/amass_${timestamp}.txt\n\ncount=$(wc -l < /tmp/amass_${timestamp}.txt 2>/dev/null || echo 0)\necho \"Amass found $count subdomains\"\n\nif [ -f /tmp/amass_${timestamp}.txt ]; then\n  cat /tmp/amass_${timestamp}.txt\nfi"
+      },
+      "id": "271042c0-e5f3-4a85-95e6-56b4f6b5352c",
+      "name": "Amass Subdomain Enum",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        2624,
+        -32
+      ],
+      "typeVersion": 1,
+      "notes": "Deep subdomain discovery and attack surface mapping"
+    },
+    {
+      "parameters": {
+        "command": "=# DNS Resolution with dig\n# Parse JSON from previous node\ntimestamp=$(echo '{{ $json.stdout }}' | grep -o '\"timestamp\":\"[^\"]*\"' | cut -d'\"' -f4)\ncount=$(echo '{{ $json.stdout }}' | grep -o '\"count\":[0-9]*' | cut -d':' -f2)\n\necho \"=== DNS RESOLUTION ===\"\necho \"Timestamp: $timestamp\"\necho \"Resolving $count subdomains to IP addresses...\"\n\nif [ ! -f \"/tmp/all_subdomains_${timestamp}.txt\" ]; then\n  echo \"Error: /tmp/all_subdomains_${timestamp}.txt not found\"\n  exit 1\nfi\n\n# Read subdomains and resolve each\nwhile IFS= read -r domain; do\n  if [ -n \"$domain\" ]; then\n    ip=$(dig +short \"$domain\" A | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' | head -1)\n    if [ -n \"$ip\" ]; then\n      echo \"${domain}|${ip}\"\n    fi\n  fi\ndone < /tmp/all_subdomains_${timestamp}.txt > /tmp/resolved_${timestamp}.txt\n\nresolved_count=$(wc -l < /tmp/resolved_${timestamp}.txt)\necho \"Resolved $resolved_count domains to IPs\"\ncat /tmp/resolved_${timestamp}.txt\n\n# Output JSON for next node\necho \"{\\\"timestamp\\\":\\\"$timestamp\\\",\\\"count\\\":$resolved_count}\""
+      },
+      "id": "a62a4e5a-5a87-4fd0-8fb1-e0802ad4c463",
+      "name": "DNS Resolution (dig)",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        3104,
+        -416
+      ],
+      "typeVersion": 1,
+      "notes": "Resolve all subdomains to IP addresses"
+    },
+    {
+      "parameters": {
+        "command": "=# HTTP Probing with httpx\necho \"Probing subdomains for live HTTP services...\"\n\n# For domain path: probe subdomains\nhttpx -l /tmp/all_subdomains_{{ $json.timestamp }}.txt -silent -json -o /tmp/httpx_{{ $json.timestamp }}.json -threads 50 -timeout 10 -retries 2 -status-code -tech-detect -title -web-server -content-length -follow-redirects\n\necho \"httpx found $(wc -l < /tmp/httpx_{{ $json.timestamp }}.json) live HTTP services\"\ncat /tmp/httpx_{{ $json.timestamp }}.json"
+      },
+      "id": "ee21baf2-9580-40c3-ba4f-3445e921d181",
+      "name": "HTTP Probing (httpx) - Domain",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        3344,
+        -208
+      ],
+      "typeVersion": 1,
+      "notes": "Find live web services on subdomains"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse httpx JSON output\nconst output = $input.first().json.stdout || '';\nconst lines = output.split('\\n').filter(l => l.trim());\n\nconsole.log('=== PARSING HTTPX RESULTS ===');\nconsole.log(`Processing ${lines.length} httpx results`);\n\nconst services = [];\nfor (const line of lines) {\n  try {\n    const data = JSON.parse(line);\n    services.push({\n      url: data.url || '',\n      host: data.host || '',\n      port: data.port || 443,\n      scheme: data.scheme || 'https',\n      statusCode: data.status_code || 0,\n      title: data.title || '',\n      webServer: data.webserver || '',\n      contentLength: data.content_length || 0,\n      technologies: data.tech || [],\n      ip: data.ip || ''\n    });\n  } catch (e) {\n    console.log(`Failed to parse line: ${line.substring(0, 100)}`);\n  }\n}\n\nconsole.log(`Parsed ${services.length} live web services`);\n\nreturn [{json: {\n  httpServices: services,\n  count: services.length,\n  urls: services.map(s => s.url)\n}}];"
+      },
+      "id": "d3e39ff4-4fa1-44eb-8eb1-5fec89a23b5b",
+      "name": "Parse httpx Results",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3856,
+        -432
+      ],
+      "typeVersion": 2,
+      "notes": "Parse httpx JSON output"
+    },
+    {
+      "parameters": {
+        "command": "=# Get unique IPs for nmap scanning\n# Parse timestamp from DNS Resolution output\ntimestamp=$(echo '{{ $json.stdout }}' | grep -o '\"timestamp\":\"[^\"]*\"' | cut -d'\"' -f4)\n\necho \"=== EXTRACTING UNIQUE IPs ===\"\necho \"Timestamp: $timestamp\"\n\nif [ ! -f \"/tmp/resolved_${timestamp}.txt\" ]; then\n  echo \"Warning: /tmp/resolved_${timestamp}.txt not found\"\n  echo \"No IPs to scan\"\n  exit 0\nfi\n\n# Extract IPs from domain|ip format\ncat /tmp/resolved_${timestamp}.txt | cut -d'|' -f2 | sort -u > /tmp/target_ips_${timestamp}.txt\n\nip_count=$(wc -l < /tmp/target_ips_${timestamp}.txt)\necho \"Unique IPs to scan: $ip_count\"\n\n# Output comma-separated list for nmap\nif [ $ip_count -gt 0 ]; then\n  cat /tmp/target_ips_${timestamp}.txt | tr '\\n' ',' | sed 's/,$//'\nelse\n  echo \"No IPs found\"\nfi"
+      },
+      "id": "046eaf9d-4d4b-42a8-9453-ebaec5eb2f7a",
+      "name": "Extract Unique IPs",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        3360,
+        -656
+      ],
+      "typeVersion": 1,
+      "notes": "Get unique IP addresses for port scanning"
+    },
+    {
+      "parameters": {
+        "command": "=# Nmap Stealth Scan - Bug Bounty Safe\n# Get target from Extract Unique IPs output\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\n\necho \"=== NMAP STEALTH PORT SCAN ===\"\necho \"Target: $target\"\n\n# Clean up \"No IPs found\" or empty targets\nif [ -z \"$target\" ] || [ \"$target\" = \"No IPs found\" ] || [ \"$target\" = \"No IPs to scan\" ]; then\n  echo \"No targets to scan\"\n  exit 0\nfi\n\n# Use top 1000 ports only, stealth timing, less aggressive\nnmap -Pn -sT -sV --version-intensity 2 \\\n  --top-ports 1000 \\\n  -T3 --max-parallelism 20 --max-retries 1 \\\n  --scan-delay 100ms \\\n  -oX /tmp/nmap_${timestamp}.xml \"$target\"\n\nif [ -f /tmp/nmap_${timestamp}.xml ]; then\n  echo \"Nmap scan complete\"\n  cat /tmp/nmap_${timestamp}.xml\nelse\n  echo \"Nmap scan failed\"\n  exit 1\nfi"
+      },
+      "id": "a03e65eb-17f5-4d9f-b414-13b040ad07e4",
+      "name": "Nmap Stealth Port Scan",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        3744,
+        480
+      ],
+      "typeVersion": 1,
+      "notes": "Stealthier port scan - top ports only, slower timing to avoid detection"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Nmap XML output to extract services\nconst raw = $input.first().json;\nconst xmlContent = raw.stdout || raw;\n\nlet services = [];\n\nconsole.log('=== PARSING NMAP XML ===');\n\n// Simple XML parsing using regex\nconst hostRegex = /<host[^>]*>[\\s\\S]*?<\\/host>/g;\nconst hosts = xmlContent.match(hostRegex) || [];\n\nconsole.log(`Found ${hosts.length} hosts`);\n\nfor (const hostXml of hosts) {\n  const addrMatch = hostXml.match(/<address\\s+addr=\"([^\"]+)\"\\s+addrtype=\"ipv4\"/i);\n  const ip = addrMatch ? addrMatch[1] : 'unknown';\n\n  const portRegex = /<port\\s+protocol=\"([^\"]+)\"\\s+portid=\"([^\"]+)\"[^>]*>([\\s\\S]*?)<\\/port>/g;\n  let portMatch;\n\n  while ((portMatch = portRegex.exec(hostXml)) !== null) {\n    const protocol = portMatch[1];\n    const portid = portMatch[2];\n    const portContent = portMatch[3];\n\n    const stateMatch = portContent.match(/<state\\s+state=\"([^\"]+)\"/i);\n    const state = stateMatch ? stateMatch[1] : 'unknown';\n\n    if (state !== 'open') continue;\n\n    const serviceMatch = portContent.match(/<service\\s+([^>]+)\\/?>/i);\n    let serviceName = 'unknown';\n    let product = '';\n    let version = '';\n    let cpe = '';\n\n    if (serviceMatch) {\n      const serviceAttrs = serviceMatch[1];\n      const nameMatch = serviceAttrs.match(/name=\"([^\"]+)\"/i);\n      serviceName = nameMatch ? nameMatch[1] : 'unknown';\n      const productMatch = serviceAttrs.match(/product=\"([^\"]+)\"/i);\n      product = productMatch ? productMatch[1] : '';\n      const versionMatch = serviceAttrs.match(/version=\"([^\"]+)\"/i);\n      version = versionMatch ? versionMatch[1] : '';\n    }\n\n    const cpeMatch = portContent.match(/<cpe>([^<]+)<\\/cpe>/i);\n    if (cpeMatch) {\n      cpe = cpeMatch[1].replace(/^cpe:\\//, 'cpe:2.3:');\n      if (!cpe.endsWith(':')) cpe += ':';\n    }\n\n    services.push({\n      ip,\n      port: portid,\n      protocol,\n      service: serviceName,\n      product,\n      version,\n      cpe,\n      serviceKey: `${ip}:${portid}`\n    });\n\n    console.log(`  ${ip}:${portid}/${protocol} - ${serviceName} ${product} ${version}`);\n  }\n}\n\nconsole.log(`✓ Parsed ${services.length} services`);\n\nreturn [{json: { services: services }}];"
+      },
+      "id": "1c689669-e651-4aa5-a0e9-99cb6c0fe142",
+      "name": "Parse Nmap Results",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4448,
+        416
+      ],
+      "typeVersion": 2,
+      "notes": "Extract all services with version details"
+    },
+    {
+      "parameters": {
+        "command": "=# Nuclei Vulnerability Scanning\necho \"Running nuclei on {{ $json.count }} URLs...\"\n\n# Create URL list for nuclei\necho '{{ $json.urls.join(\"\\n\") }}' > /tmp/nuclei_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\n# Run nuclei with all templates\nnuclei -l /tmp/nuclei_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt -json -o /tmp/nuclei_{{ $('1. Set Parameters').item.json.timestamp }}.json -severity critical,high,medium,low,info -rate-limit 150 -bulk-size 25 -timeout 10\n\necho \"Nuclei scan complete. Found $(wc -l < /tmp/nuclei_{{ $('1. Set Parameters').item.json.timestamp }}.json) vulnerabilities\"\ncat /tmp/nuclei_{{ $('1. Set Parameters').item.json.timestamp }}.json"
+      },
+      "id": "ee9a8883-8739-43a1-9b70-a81c31c6840a",
+      "name": "Nuclei Vulnerability Scan",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        4336,
+        -288
+      ],
+      "typeVersion": 1,
+      "notes": "Automated vulnerability scanning with nuclei templates"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Nuclei JSON output\nconst output = $input.first().json.stdout || '';\nconst lines = output.split('\\n').filter(l => l.trim());\n\nconsole.log('=== PARSING NUCLEI RESULTS ===');\nconsole.log(`Processing ${lines.length} nuclei findings`);\n\nconst vulnerabilities = [];\nfor (const line of lines) {\n  try {\n    const vuln = JSON.parse(line);\n    vulnerabilities.push({\n      templateId: vuln['template-id'] || '',\n      name: vuln.info?.name || '',\n      severity: vuln.info?.severity || 'info',\n      description: vuln.info?.description || '',\n      tags: vuln.info?.tags || [],\n      reference: vuln.info?.reference || [],\n      host: vuln.host || '',\n      matchedAt: vuln['matched-at'] || '',\n      extractedResults: vuln['extracted-results'] || [],\n      timestamp: vuln.timestamp || ''\n    });\n  } catch (e) {\n    console.log(`Failed to parse line: ${line.substring(0, 100)}`);\n  }\n}\n\nconsole.log(`Parsed ${vulnerabilities.length} nuclei vulnerabilities`);\n\n// Group by severity\nconst bySeverity = {\n  critical: vulnerabilities.filter(v => v.severity === 'critical').length,\n  high: vulnerabilities.filter(v => v.severity === 'high').length,\n  medium: vulnerabilities.filter(v => v.severity === 'medium').length,\n  low: vulnerabilities.filter(v => v.severity === 'low').length,\n  info: vulnerabilities.filter(v => v.severity === 'info').length\n};\n\nconsole.log(`Severity breakdown: Critical=${bySeverity.critical}, High=${bySeverity.high}, Medium=${bySeverity.medium}, Low=${bySeverity.low}, Info=${bySeverity.info}`);\n\nreturn [{json: {\n  nucleiFindings: vulnerabilities,\n  count: vulnerabilities.length,\n  severityBreakdown: bySeverity\n}}];"
+      },
+      "id": "32497448-3b75-4c77-b2a7-1d1d483d4ea4",
+      "name": "Parse Nuclei Results",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4704,
+        80
+      ],
+      "typeVersion": 2,
+      "notes": "Parse and categorize nuclei findings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// CVE ENRICHMENT - Query NVD API for each service\nconst services = $('Parse Nmap Results').first().json.services;\nconst enriched = [];\n\nconsole.log('=== CVE ENRICHMENT START ===');\nconsole.log(`Processing ${services.length} services`);\n\nfor (let i = 0; i < services.length; i++) {\n  const service = services[i];\n  const base = {\n    ip: service.ip,\n    port: service.port,\n    protocol: service.protocol,\n    service: service.service,\n    product: service.product,\n    version: service.version,\n    cpe: service.cpe,\n    serviceKey: service.serviceKey\n  };\n\n  // OVERRIDE: nginx vendor fix\n  if (base.product && base.product.toLowerCase() === 'nginx' && base.cpe) {\n    base.cpe = base.cpe.replace('igor_sysoev', 'nginx');\n  }\n\n  console.log(`[${i+1}/${services.length}] ${base.ip}:${base.port} ${base.service} ${base.product} ${base.version}`);\n\n  if (!base.cpe || base.cpe === '' || base.cpe === ':') {\n    console.log('  → No CPE, skipping CVE lookup');\n    enriched.push({\n      ...base,\n      cveId: 'N/A',\n      cveSummary: 'No CPE available for vulnerability lookup',\n      cvssScore: 0,\n      severity: 'INFO',\n      publishedDate: 'N/A',\n      references: []\n    });\n    continue;\n  }\n\n  console.log(`  → CPE: ${base.cpe}`);\n\n  try {\n    const apiUrl = `https://services.nvd.nist.gov/rest/json/cves/2.0?cpeName=${encodeURIComponent(base.cpe)}&resultsPerPage=10&isVulnerable`;\n    console.log('  → Querying NVD API...');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: apiUrl,\n      timeout: 30000,\n      headers: {\n        'User-Agent': 'n8n-vulnerability-scanner/2.0'\n      }\n    });\n\n    const vulnerabilities = response.vulnerabilities || [];\n    console.log(`  → Found ${vulnerabilities.length} CVEs`);\n\n    if (vulnerabilities.length === 0) {\n      enriched.push({\n        ...base,\n        cveId: 'N/A',\n        cveSummary: 'No known vulnerabilities found in NVD database',\n        cvssScore: 0,\n        severity: 'INFO',\n        publishedDate: 'N/A',\n        references: []\n      });\n    } else {\n      for (const vuln of vulnerabilities) {\n        const cve = vuln.cve || {};\n        const cveId = cve.id || 'UNKNOWN';\n        const descriptions = cve.descriptions || [];\n        const cveSummary = descriptions.find(d => d.lang === 'en')?.value || 'No description available';\n        const metrics = cve.metrics || {};\n        const cvssV31 = metrics.cvssMetricV31?.[0]?.cvssData;\n        const cvssV30 = metrics.cvssMetricV30?.[0]?.cvssData;\n        const cvssData = cvssV31 || cvssV30 || {};\n        const cvssScore = cvssData.baseScore || 0;\n        const severity = cvssData.baseSeverity || 'UNKNOWN';\n        const publishedDate = cve.published || 'N/A';\n        const references = (cve.references || []).slice(0, 3).map(ref => ref.url);\n\n        enriched.push({\n          ...base,\n          cveId,\n          cveSummary,\n          cvssScore,\n          severity,\n          publishedDate,\n          references\n        });\n\n        console.log(`    - ${cveId} (${severity}, CVSS: ${cvssScore})`);\n      }\n    }\n\n    if (i < services.length - 1) {\n      console.log('  → Waiting 1s (rate limit)...');\n      await new Promise(resolve => setTimeout(resolve, 1000));\n    }\n\n  } catch (error) {\n    console.log(`  ✗ API ERROR: ${error.message}`);\n    enriched.push({\n      ...base,\n      cveId: 'N/A',\n      cveSummary: `API Error: ${error.message}`,\n      cvssScore: 0,\n      severity: 'ERROR',\n      publishedDate: 'N/A',\n      references: []\n    });\n  }\n}\n\nconsole.log(`=== CVE ENRICHMENT COMPLETE: ${enriched.length} results ===`);\nreturn [{json: { cveEnriched: enriched }}];"
+      },
+      "id": "eb4f9772-ee9c-4a64-9d9c-a6a4bbe9aafa",
+      "name": "CVE Enrichment (NVD)",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        5200,
+        304
+      ],
+      "typeVersion": 2,
+      "notes": "Query NVD API for CVE data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ENHANCED REPORT PREPARATION WITH ALL NEW TOOLS\nconsole.log('=== PREPARING COMPREHENSIVE BUG BOUNTY REPORT ===');\n\nconst target = $('1. Set Parameters').first().json.target;\nconst timestamp = $('1. Set Parameters').first().json.timestamp;\n\nfunction safeGetNodeData(nodeName, dataPath) {\n  try {\n    const nodeData = $(nodeName).first();\n    const keys = dataPath.split('.');\n    let value = nodeData;\n    for (const key of keys) {\n      value = value[key];\n      if (value === undefined) return null;\n    }\n    return value;\n  } catch (error) {\n    return null;\n  }\n}\n\n// Gather data from all nodes\nconst whoisData = safeGetNodeData('Whois Lookup', 'json.stdout') || 'N/A';\nconst subdomains = safeGetNodeData('Merge & Deduplicate Subdomains', 'json.subdomains') || [];\nconst httpServices = safeGetNodeData('Parse httpx Results', 'json.httpServices') || [];\nconst nmapServices = safeGetNodeData('Parse Nmap Results', 'json.services') || [];\nconst nucleiFindings = safeGetNodeData('Parse Nuclei Results', 'json.nucleiFindings') || [];\nconst cveData = safeGetNodeData('CVE Enrichment (NVD)', 'json.cveEnriched') || [];\n\n// NEW: Web recon data\nconst webRecon = safeGetNodeData('Parse Web Recon Results', 'json.webRecon') || {\n  waybackUrls: [],\n  gobusterFindings: [],\n  whatwebTech: [],\n  testsslIssues: [],\n  secrets: []\n};\n\nconst isDomainScan = subdomains.length > 0 || whoisData.includes('Domain');\nconst scanType = isDomainScan ? 'Domain-Based Attack Surface Assessment' : 'Network/IP-Based Vulnerability Assessment';\n\nconsole.log(`Scan Type: ${scanType}`);\nconsole.log(`Subdomains: ${subdomains.length}`);\nconsole.log(`HTTP Services: ${httpServices.length}`);\nconsole.log(`Nmap Services: ${nmapServices.length}`);\nconsole.log(`Nuclei Findings: ${nucleiFindings.length}`);\nconsole.log(`CVEs: ${cveData.length}`);\nconsole.log(`Wayback URLs: ${webRecon.waybackUrls.length}`);\nconsole.log(`Directories: ${webRecon.gobusterFindings.length}`);\nconsole.log(`SSL Issues: ${webRecon.testsslIssues.length}`);\nconsole.log(`Secrets: ${webRecon.secrets.length}`);\n\nconst report = {\n  metadata: {\n    title: 'Advanced Bug Bounty Reconnaissance Report',\n    subtitle: scanType,\n    version: '3.0.0',\n    scanDate: new Date().toISOString().split('T')[0],\n    scanTime: new Date().toISOString().split('T')[1].split('.')[0],\n    scanTarget: target,\n    scanType: isDomainScan ? 'domain' : 'ip'\n  },\n  whois: whoisData,\n  subdomainEnumeration: {\n    count: subdomains.length,\n    domains: subdomains\n  },\n  httpDiscovery: {\n    count: httpServices.length,\n    services: httpServices\n  },\n  portScanning: {\n    count: nmapServices.length,\n    services: nmapServices\n  },\n  nucleiVulnerabilities: {\n    count: nucleiFindings.length,\n    findings: nucleiFindings,\n    severityBreakdown: {\n      critical: nucleiFindings.filter(f => f.severity === 'critical').length,\n      high: nucleiFindings.filter(f => f.severity === 'high').length,\n      medium: nucleiFindings.filter(f => f.severity === 'medium').length,\n      low: nucleiFindings.filter(f => f.severity === 'low').length,\n      info: nucleiFindings.filter(f => f.severity === 'info').length\n    }\n  },\n  cveFindings: {\n    count: cveData.length,\n    data: cveData\n  },\n  webReconnaissance: webRecon,\n  statistics: {\n    totalSubdomains: subdomains.length,\n    totalHttpServices: httpServices.length,\n    totalPorts: nmapServices.length,\n    totalNucleiFindings: nucleiFindings.length,\n    totalCVEs: cveData.filter(c => c.cveId !== 'N/A').length,\n    totalWaybackUrls: webRecon.waybackUrls.length,\n    totalDirectories: webRecon.gobusterFindings.length,\n    totalTechnologies: webRecon.whatwebTech.length,\n    totalSslIssues: webRecon.testsslIssues.length,\n    totalSecrets: webRecon.secrets.length\n  }\n};\n\nconsole.log('✓ Enhanced report structure prepared');\nreturn [{json: report}];"
+      },
+      "id": "0a3b8f8a-b887-405d-b3d3-c1ac19a664f4",
+      "name": "Prepare Comprehensive Report",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        5520,
+        304
+      ],
+      "typeVersion": 2,
+      "notes": "Aggregate all scan data into unified report"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ENHANCED HTML REPORT WITH ALL BUG BOUNTY FINDINGS\nconst report = items[0].json;\nconst meta = report.metadata;\nconst webRecon = report.webReconnaissance || {};\n\nconsole.log('=== GENERATING ENHANCED BUG BOUNTY REPORT ===');\n\nfunction severityColor(severity) {\n  const colors = {\n    'critical': '#c62828', 'high': '#f57c00', 'medium': '#fbc02d',\n    'low': '#388e3c', 'info': '#1976d2', 'error': '#9e9e9e', 'unknown': '#757575'\n  };\n  return colors[(severity || 'info').toLowerCase()] || '#757575';\n}\n\nfunction severityBadge(severity) {\n  return `<span class=\"severity-badge\" style=\"background-color:${severityColor(severity)}\">${(severity || 'INFO').toUpperCase()}</span>`;\n}\n\nlet html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>${meta.title}</title>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }\n    .container { max-width: 1400px; margin: 0 auto; padding: 20px; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%); color: white; padding: 40px 30px; margin: -20px -20px 30px -20px; }\n    .header h1 { font-size: 32px; margin-bottom: 10px; }\n    .header .subtitle { font-size: 16px; opacity: 0.9; }\n    .meta-info { background: #f9f9f9; border-left: 4px solid #1976d2; padding: 15px 20px; margin-bottom: 30px; }\n    h2 { color: #1976d2; font-size: 28px; margin: 40px 0 20px 0; padding-bottom: 10px; border-bottom: 2px solid #e0e0e0; }\n    h3 { color: #424242; font-size: 22px; margin: 30px 0 15px 0; }\n    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0; }\n    .stat-card { background: #f9f9f9; padding: 20px; border-radius: 8px; border-left: 4px solid #1976d2; }\n    .stat-card .label { font-size: 12px; color: #757575; margin-bottom: 8px; }\n    .stat-card .value { font-size: 28px; font-weight: bold; color: #1976d2; }\n    .severity-badge { display: inline-block; padding: 4px 12px; border-radius: 4px; color: white; font-size: 12px; font-weight: 600; text-transform: uppercase; margin: 2px; }\n    .section { background: #fafafa; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .list-item { background: white; padding: 12px; margin: 8px 0; border-radius: 4px; border-left: 3px solid #1976d2; font-size: 14px; }\n    table { width: 100%; border-collapse: collapse; margin: 20px 0; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }\n    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e0e0e0; font-size: 13px; }\n    th { background: #f5f5f5; font-weight: 600; color: #424242; text-transform: uppercase; font-size: 11px; }\n    tr:hover { background: #fafafa; }\n    .whois-box { background: #f5f5f5; padding: 15px; border-radius: 6px; font-family: monospace; font-size: 11px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }\n    .secret-alert { background: #fff3cd; border-left: 4px solid #f57c00; padding: 15px; margin: 10px 0; border-radius: 4px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>${meta.title}</h1>\n      <div class=\"subtitle\">${meta.subtitle}</div>\n    </div>\n    <div class=\"meta-info\">\n      <div><strong>Target:</strong> ${meta.scanTarget}</div>\n      <div><strong>Scan Date:</strong> ${meta.scanDate} ${meta.scanTime}</div>\n      <div><strong>Report Version:</strong> ${meta.version}</div>\n    </div>\n    <h2>Executive Summary</h2>\n    <div class=\"stats-grid\">\n      <div class=\"stat-card\"><div class=\"label\">Subdomains</div><div class=\"value\">${report.statistics.totalSubdomains}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">HTTP Services</div><div class=\"value\">${report.statistics.totalHttpServices}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Open Ports</div><div class=\"value\">${report.statistics.totalPorts}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Vulnerabilities</div><div class=\"value\">${report.statistics.totalNucleiFindings}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">CVEs</div><div class=\"value\">${report.statistics.totalCVEs}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Wayback URLs</div><div class=\"value\">${report.statistics.totalWaybackUrls}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">Directories</div><div class=\"value\">${report.statistics.totalDirectories}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">SSL Issues</div><div class=\"value\">${report.statistics.totalSslIssues}</div></div>\n      <div class=\"stat-card\"><div class=\"label\">⚠️ Secrets</div><div class=\"value\" style=\"color: ${report.statistics.totalSecrets > 0 ? '#f57c00' : '#388e3c'}\">${report.statistics.totalSecrets}</div></div>\n    </div>`;\n\n// Secrets Section (CRITICAL)\nif (webRecon.secrets && webRecon.secrets.length > 0) {\n  html += `\n    <h2>🔥 Exposed Secrets (HIGH PRIORITY)</h2>\n    <div class=\"secret-alert\">\n      <strong>WARNING:</strong> ${webRecon.secrets.length} potential secrets or credentials detected!\n    </div>\n    <table>\n      <thead><tr><th>Type</th><th>Source</th><th>Preview</th></tr></thead>\n      <tbody>`;\n  \n  for (const secret of webRecon.secrets.slice(0, 20)) {\n    html += `<tr>\n      <td><strong>${secret.DetectorName || 'Unknown'}</strong></td>\n      <td>${secret.SourceMetadata?.Data?.Filesystem?.file || 'N/A'}</td>\n      <td><code>${(secret.Raw || '').substring(0, 50)}...</code></td>\n    </tr>`;\n  }\n  html += `</tbody></table>`;\n}\n\nhtml += `\n    <h2>Subdomain Enumeration</h2>\n    <p><strong>Total: </strong>${report.subdomainEnumeration.count}</p>\n    <div class=\"section\">`;\nfor (const domain of report.subdomainEnumeration.domains.slice(0, 50)) {\n  html += `<div class=\"list-item\">${domain}</div>`;\n}\nif (report.subdomainEnumeration.count > 50) html += `<p><em>... and ${report.subdomainEnumeration.count - 50} more</em></p>`;\n\nhtml += `</div>\n    <h2>HTTP Service Discovery</h2>\n    <table>\n      <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th><th>Tech</th></tr></thead>\n      <tbody>`;\nfor (const svc of report.httpDiscovery.services.slice(0, 30)) {\n  html += `<tr>\n    <td><a href=\"${svc.url}\" target=\"_blank\">${svc.url}</a></td>\n    <td>${svc.statusCode}</td>\n    <td>${(svc.title || '-').substring(0, 50)}</td>\n    <td>${svc.webServer || '-'}</td>\n    <td>${(svc.technologies || []).join(', ').substring(0, 40) || '-'}</td>\n  </tr>`;\n}\nhtml += `</tbody></table>`;\n\n// Wayback URLs\nif (webRecon.waybackUrls && webRecon.waybackUrls.length > 0) {\n  html += `\n    <h2>Historical URLs (Wayback Machine)</h2>\n    <p><strong>Interesting endpoints discovered:</strong> ${webRecon.waybackUrls.length}</p>\n    <div class=\"section\">`;\n  for (const url of webRecon.waybackUrls.slice(0, 50)) {\n    html += `<div class=\"list-item\">${url}</div>`;\n  }\n  html += `</div>`;\n}\n\n// Directory Findings\nif (webRecon.gobusterFindings && webRecon.gobusterFindings.length > 0) {\n  html += `\n    <h2>Directory Bruteforce Results</h2>\n    <div class=\"section\">`;\n  for (const finding of webRecon.gobusterFindings.slice(0, 50)) {\n    html += `<div class=\"list-item\">${finding}</div>`;\n  }\n  html += `</div>`;\n}\n\n// SSL/TLS Issues\nif (webRecon.testsslIssues && webRecon.testsslIssues.length > 0) {\n  html += `\n    <h2>SSL/TLS Security Issues</h2>\n    <table>\n      <thead><tr><th>Host</th><th>Issue</th><th>Severity</th></tr></thead>\n      <tbody>`;\n  for (const issue of webRecon.testsslIssues.slice(0, 30)) {\n    html += `<tr>\n      <td>${issue.ip || 'N/A'}</td>\n      <td>${issue.id || 'N/A'}</td>\n      <td>${severityBadge(issue.severity)}</td>\n    </tr>`;\n  }\n  html += `</tbody></table>`;\n}\n\nhtml += `\n    <h2>Nuclei Vulnerability Findings</h2>\n    <table>\n      <thead><tr><th>Template</th><th>Name</th><th>Severity</th><th>Host</th></tr></thead>\n      <tbody>`;\nfor (const finding of report.nucleiVulnerabilities.findings.slice(0, 50)) {\n  html += `<tr>\n    <td><code>${finding.templateId}</code></td>\n    <td>${finding.name}</td>\n    <td>${severityBadge(finding.severity)}</td>\n    <td>${finding.host}</td>\n  </tr>`;\n}\nhtml += `</tbody></table>\n\n    <h2>Port Scanning Results</h2>\n    <table>\n      <thead><tr><th>IP</th><th>Port</th><th>Service</th><th>Version</th></tr></thead>\n      <tbody>`;\nfor (const svc of report.portScanning.services.slice(0, 50)) {\n  html += `<tr>\n    <td>${svc.ip}</td>\n    <td><strong>${svc.port}</strong></td>\n    <td>${svc.service}</td>\n    <td>${svc.product || '-'} ${svc.version || ''}</td>\n  </tr>`;\n}\nhtml += `</tbody></table>\n\n    <h2>CVE Findings</h2>\n    <table>\n      <thead><tr><th>Service</th><th>CVE</th><th>CVSS</th><th>Description</th></tr></thead>\n      <tbody>`;\nfor (const cve of report.cveFindings.data.filter(c => c.cveId !== 'N/A').slice(0, 30)) {\n  html += `<tr>\n    <td>${cve.product} ${cve.version}</td>\n    <td><strong>${cve.cveId}</strong></td>\n    <td>${cve.cvssScore}</td>\n    <td>${cve.cveSummary.substring(0, 100)}...</td>\n  </tr>`;\n}\nhtml += `</tbody></table>\n  </div>\n</body>\n</html>`;\n\nconsole.log('✓ Enhanced bug bounty report generated');\nconst buffer = Buffer.from(html, 'utf-8');\nreturn [{\n  json: { html: html },\n  binary: { data: { data: buffer.toString('base64'), mimeType: 'text/html', fileName: 'bug_bounty_report.html' } }\n}];"
+      },
+      "id": "7fbbc3b6-c77e-4252-acf1-76876c7a65b9",
+      "name": "Generate Comprehensive HTML Report",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        5840,
+        304
+      ],
+      "typeVersion": 2,
+      "notes": "Create detailed HTML report with all findings"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "preset-1",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $json.chatInput }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c5c6e5dc-7102-4dfc-b56e-d56e73624d3c",
+      "name": "Pre-Set-Target",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1152,
+        304
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 1
+            }
+          ]
+        }
+      },
+      "id": "8a5081d6-16bf-4bef-b55d-f865f01b1dbc",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        816,
+        16
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "formTitle": "Advanced Security Scanner",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Target (Domain or IP/Network)",
+              "placeholder": "example.com or 192.168.1.0/24",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "path": "scan"
+        }
+      },
+      "id": "87cc0abf-64c5-43d7-866b-27b3736d0e2a",
+      "name": "Form Trigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "position": [
+        1152,
+        592
+      ],
+      "webhookId": "e8ecf0c1-1cee-4280-bebc-5ea8b9e85a01",
+      "typeVersion": 2.3
+    },
+    {
+      "parameters": {
+        "content": "## ADVANCED ATTACK SURFACE SCANNER\n\n**Capabilities:**\n- Subdomain enumeration (subfinder + amass)\n- DNS resolution and WHOIS lookup\n- HTTP service discovery (httpx)\n- Port scanning (nmap)\n- Vulnerability scanning (nuclei)\n- CVE enrichment (NVD API)\n- Password-protected PDF reports\n\n**Tools Integrated:**\n- subfinder: Passive subdomain discovery\n- amass: OSINT attack surface mapping\n- httpx: Fast HTTP probing\n- nuclei: Automated vulnerability scanning\n- nmap: Port and service detection\n- dig/whois: DNS and domain intelligence\n\n**Setup:**\n1. Update 'Pre-Set-Target' node with your target\n2. Set report password in '1. Set Parameters'\n3. First run auto-installs all tools\n4. Choose trigger: webhook, form, manual, or scheduled",
+        "height": 640,
+        "width": 520
+      },
+      "id": "668d6514-f744-4e20-8ad7-737fdfca706c",
+      "name": "Sticky Note - Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        784,
+        320
+      ],
+      "id": "bd9d5f8d-d19a-447c-8720-5ee0c3ecfbbf",
+      "name": "When chat message received",
+      "webhookId": "5ac850b4-1c6a-439e-8344-c9ad7f824b96"
+    },
+    {
+      "parameters": {
+        "command": "=# Naabu - Fast port discovery (optional, skip if not available)\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget_ips=\"{{ $json.stdout }}\"\n\necho \"=== NAABU PORT DISCOVERY ===\"\n\n# Check if naabu is available\nif ! command -v naabu &> /dev/null; then\n  echo \"Naabu not available, skipping fast port discovery\"\n  echo \"Will proceed directly to nmap\"\n  exit 0\nfi\n\n# Check if we have IPs to scan\nif [ -z \"$target_ips\" ] || [ \"$target_ips\" = \"No IPs found\" ]; then\n  echo \"No IPs to scan\"\n  exit 0\nfi\n\necho \"Running naabu on: $target_ips\"\n\n# Fast port discovery with naabu\necho \"$target_ips\" | tr ',' '\\n' | naabu \\\n  -top-ports 1000 \\\n  -rate 1000 \\\n  -silent \\\n  -json \\\n  -o /tmp/naabu_${timestamp}.json 2>/dev/null || echo \"Naabu scan failed, continuing...\"\n\nif [ -f /tmp/naabu_${timestamp}.json ]; then\n  port_count=$(cat /tmp/naabu_${timestamp}.json | wc -l)\n  echo \"Naabu found $port_count open ports\"\n  cat /tmp/naabu_${timestamp}.json\nelse\n  echo \"No naabu results, will use nmap instead\"\nfi"
+      },
+      "id": "naabu-scan-node",
+      "name": "Naabu Fast Port Discovery",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3648,
+        -672
+      ],
+      "notes": "Fast SYN scan for port discovery - feeds into nmap for detailed analysis"
+    },
+    {
+      "parameters": {
+        "command": "=# Wayback URLs - Historical endpoint discovery\n# Parse JSON from merge node\ntimestamp=$(echo '{{ $json.stdout }}' | grep -o '\"timestamp\":\"[^\"]*\"' | cut -d'\"' -f4)\ncount=$(echo '{{ $json.stdout }}' | grep -o '\"count\":[0-9]*' | cut -d':' -f2)\n\necho \"Discovering historical URLs for $count domains...\"\n\nif [ ! -f \"/tmp/all_subdomains_${timestamp}.txt\" ]; then\n  echo \"Warning: /tmp/all_subdomains_${timestamp}.txt not found, skipping wayback\"\n  touch /tmp/wayback_interesting_${timestamp}.txt\n  exit 0\nfi\n\n# Get URLs from wayback machine for all discovered domains\ncat /tmp/all_subdomains_${timestamp}.txt | waybackurls > /tmp/wayback_${timestamp}.txt\n\necho \"Wayback found $(wc -l < /tmp/wayback_${timestamp}.txt) historical URLs\"\n\n# Deduplicate and filter interesting URLs\ncat /tmp/wayback_${timestamp}.txt | \\\n  grep -E '\\.(js|json|xml|csv|txt|log|bak|sql|zip|tar|gz|env|config)$|api/|admin/|backup/|test/|dev/|staging/' | \\\n  sort -u > /tmp/wayback_interesting_${timestamp}.txt\n\necho \"Found $(wc -l < /tmp/wayback_interesting_${timestamp}.txt) interesting URLs\"\ncat /tmp/wayback_interesting_${timestamp}.txt"
+      },
+      "id": "waybackurls-node",
+      "name": "Wayback URLs Discovery",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3840,
+        128
+      ],
+      "notes": "Discover historical URLs and endpoints from Wayback Machine"
+    },
+    {
+      "parameters": {
+        "command": "=# Gobuster - Directory/file discovery\necho \"Running gobuster on discovered HTTP services...\"\n\n# Create target list from httpx results\ncat /tmp/httpx_{{ $('Merge & Deduplicate Subdomains').item.json.timestamp }}.json | jq -r '.url' | head -20 > /tmp/gobuster_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\ntouch /tmp/gobuster_results_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\n# Run gobuster on top 20 targets (to save time)\nwhile IFS= read -r url; do\n  echo \"Scanning: $url\"\n  gobuster dir -u \"$url\" \\\n    -w /usr/share/wordlists/dirb/common.txt \\\n    -t 20 \\\n    -q \\\n    -k \\\n    --no-error \\\n    -o /tmp/gobuster_${url//[:.\\/]/_}.txt 2>/dev/null || true\n  \n  cat /tmp/gobuster_${url//[:.\\/]/_}.txt >> /tmp/gobuster_results_{{ $('1. Set Parameters').item.json.timestamp }}.txt 2>/dev/null || true\ndone < /tmp/gobuster_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\necho \"Gobuster scan complete\"\ncat /tmp/gobuster_results_{{ $('1. Set Parameters').item.json.timestamp }}.txt"
+      },
+      "id": "gobuster-node",
+      "name": "Gobuster Directory Bruteforce",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4592,
+        -240
+      ],
+      "notes": "Directory and file discovery using wordlist bruteforcing"
+    },
+    {
+      "parameters": {
+        "command": "=# DNSRecon - Advanced DNS enumeration\necho \"Running DNSRecon on {{ $('1. Set Parameters').item.json.target }}...\"\n\n# Try zone transfer first\ndnsrecon -d {{ $('1. Set Parameters').item.json.target }} -t axfr -j /tmp/dnsrecon_axfr_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\n\n# Standard enumeration\ndnsrecon -d {{ $('1. Set Parameters').item.json.target }} -t std -j /tmp/dnsrecon_std_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\n\n# Bruteforce subdomains\ndnsrecon -d {{ $('1. Set Parameters').item.json.target }} -t brt -D /usr/share/dnsrecon/namelist.txt -j /tmp/dnsrecon_brt_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\n\necho \"DNSRecon enumeration complete\"\ncat /tmp/dnsrecon_std_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || echo '{}'"
+      },
+      "id": "dnsrecon-node",
+      "name": "DNSRecon Advanced Enum",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2624,
+        128
+      ],
+      "notes": "Advanced DNS reconnaissance - zone transfers, bruteforce, cache snooping"
+    },
+    {
+      "parameters": {
+        "command": "=# theHarvester - OSINT data gathering\necho \"Running theHarvester on {{ $('1. Set Parameters').item.json.target }}...\"\n\n# Gather data from multiple sources\ntheHarvester -d {{ $('1. Set Parameters').item.json.target }} \\\n  -b google,bing,yahoo,duckduckgo,certspotter,crtsh,hackertarget,threatcrowd \\\n  -f /tmp/theharvester_{{ $('1. Set Parameters').item.json.timestamp }} \\\n  2>/dev/null || true\n\necho \"theHarvester OSINT complete\"\ncat /tmp/theharvester_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || cat /tmp/theharvester_{{ $('1. Set Parameters').item.json.timestamp }}.xml 2>/dev/null || echo 'No results'"
+      },
+      "id": "theharvester-node",
+      "name": "theHarvester OSINT",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2544,
+        272
+      ],
+      "notes": "OSINT gathering - emails, subdomains, IPs from multiple sources"
+    },
+    {
+      "parameters": {
+        "command": "=# TruffleHog - Secrets and credential scanning\necho \"Scanning for exposed secrets...\"\n\n# Scan wayback URLs for secrets\nif [ -f /tmp/wayback_interesting_{{ $('1. Set Parameters').item.json.timestamp }}.txt ]; then\n  echo \"Scanning wayback URLs for secrets...\"\n  \n  # Scan top 50 interesting URLs\n  head -50 /tmp/wayback_interesting_{{ $('1. Set Parameters').item.json.timestamp }}.txt | while read url; do\n    echo \"Checking: $url\"\n    trufflehog filesystem --directory=\"$url\" --json --no-verification 2>/dev/null || true\n  done > /tmp/trufflehog_{{ $('1. Set Parameters').item.json.timestamp }}.json\nfi\n\necho \"TruffleHog scan complete\"\ncat /tmp/trufflehog_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null | jq -s 'length' 2>/dev/null || echo '0'"
+      },
+      "id": "trufflehog-node",
+      "name": "TruffleHog Secrets Scanner",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4928,
+        -336
+      ],
+      "notes": "Scan discovered URLs and content for exposed secrets, API keys, credentials"
+    },
+    {
+      "parameters": {
+        "command": "=# TestSSL - SSL/TLS security assessment\necho \"Testing SSL/TLS configurations...\"\n\n# Get HTTPS hosts from httpx results\ncat /tmp/httpx_{{ $('Merge & Deduplicate Subdomains').item.json.timestamp }}.json 2>/dev/null | \\\n  jq -r 'select(.scheme==\"https\") | .host' | \\\n  head -10 > /tmp/https_hosts_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\ntouch /tmp/testssl_{{ $('1. Set Parameters').item.json.timestamp }}.json\n\n# Test top 10 HTTPS hosts\nwhile IFS= read -r host; do\n  echo \"Testing SSL on: $host\"\n  testssl.sh --jsonfile=/tmp/testssl_${host//[:.\\/]/_}.json \\\n    --quiet \\\n    --fast \\\n    \"$host\" 2>/dev/null || true\n  \n  cat /tmp/testssl_${host//[:.\\/]/_}.json >> /tmp/testssl_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || true\ndone < /tmp/https_hosts_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\necho \"TestSSL scan complete\"\ncat /tmp/testssl_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null | head -100"
+      },
+      "id": "testssl-node",
+      "name": "TestSSL Security Check",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4800,
+        -544
+      ],
+      "notes": "SSL/TLS configuration testing - vulnerabilities, ciphers, certificates"
+    },
+    {
+      "parameters": {
+        "command": "=# WhatWeb - Technology fingerprinting\necho \"Running WhatWeb technology detection...\"\n\n# Create URL list from httpx\ncat /tmp/httpx_{{ $json.timestamp }}.json | jq -r '.url' | head -30 > /tmp/whatweb_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt\n\n# Run WhatWeb with aggressive scanning\nwhatweb --input-file=/tmp/whatweb_targets_{{ $('1. Set Parameters').item.json.timestamp }}.txt \\\n  --aggression 3 \\\n  --log-json=/tmp/whatweb_{{ $('1. Set Parameters').item.json.timestamp }}.json \\\n  --no-errors \\\n  2>/dev/null || true\n\necho \"WhatWeb found $(cat /tmp/whatweb_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null | wc -l) technology profiles\"\ncat /tmp/whatweb_{{ $('1. Set Parameters').item.json.timestamp }}.json 2>/dev/null || echo '[]'"
+      },
+      "id": "whatweb-node",
+      "name": "WhatWeb Technology Detection",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4064,
+        -112
+      ],
+      "notes": "Deep technology fingerprinting - CMS, frameworks, servers, plugins"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse all web reconnaissance results\nconst timestamp = $('1. Set Parameters').item.json.timestamp;\nconst fs = require('fs');\n\nconsole.log('=== PARSING WEB RECON RESULTS ===');\n\nconst results = {\n  waybackUrls: [],\n  gobusterFindings: [],\n  whatwebTech: [],\n  testsslIssues: [],\n  secrets: []\n};\n\n// Parse Wayback URLs\ntry {\n  const wayback = fs.readFileSync(`/tmp/wayback_interesting_${timestamp}.txt`, 'utf8');\n  results.waybackUrls = wayback.split('\\n').filter(u => u.trim()).slice(0, 100);\n  console.log(`Wayback URLs: ${results.waybackUrls.length}`);\n} catch (e) {\n  console.log('No wayback results');\n}\n\n// Parse Gobuster findings\ntry {\n  const gobuster = fs.readFileSync(`/tmp/gobuster_results_${timestamp}.txt`, 'utf8');\n  results.gobusterFindings = gobuster.split('\\n')\n    .filter(l => l.includes('Status:'))\n    .slice(0, 100);\n  console.log(`Gobuster findings: ${results.gobusterFindings.length}`);\n} catch (e) {\n  console.log('No gobuster results');\n}\n\n// Parse WhatWeb tech\ntry {\n  const whatweb = fs.readFileSync(`/tmp/whatweb_${timestamp}.json`, 'utf8');\n  const lines = whatweb.split('\\n').filter(l => l.trim());\n  results.whatwebTech = lines.map(l => {\n    try {\n      return JSON.parse(l);\n    } catch (e) {\n      return null;\n    }\n  }).filter(t => t !== null).slice(0, 50);\n  console.log(`WhatWeb tech profiles: ${results.whatwebTech.length}`);\n} catch (e) {\n  console.log('No whatweb results');\n}\n\n// Parse TestSSL issues\ntry {\n  const testssl = fs.readFileSync(`/tmp/testssl_${timestamp}.json`, 'utf8');\n  const findings = JSON.parse(`[${testssl.replace(/\\}\\s*\\{/g, '},{')}]`);\n  results.testsslIssues = findings\n    .filter(f => f.severity && f.severity !== 'OK')\n    .slice(0, 50);\n  console.log(`TestSSL issues: ${results.testsslIssues.length}`);\n} catch (e) {\n  console.log('No testssl results');\n}\n\n// Parse Secrets\ntry {\n  const secrets = fs.readFileSync(`/tmp/trufflehog_${timestamp}.json`, 'utf8');\n  const lines = secrets.split('\\n').filter(l => l.trim());\n  results.secrets = lines.map(l => {\n    try {\n      return JSON.parse(l);\n    } catch (e) {\n      return null;\n    }\n  }).filter(s => s !== null && s.DetectorName).slice(0, 50);\n  console.log(`Secrets found: ${results.secrets.length}`);\n} catch (e) {\n  console.log('No secrets found');\n}\n\nconsole.log('✓ Web recon parsing complete');\n\nreturn [{json: {\n  webRecon: results,\n  summary: {\n    waybackUrls: results.waybackUrls.length,\n    directories: results.gobusterFindings.length,\n    technologies: results.whatwebTech.length,\n    sslIssues: results.testsslIssues.length,\n    secrets: results.secrets.length\n  }\n}}];"
+      },
+      "id": "parse-web-recon-node",
+      "name": "Parse Web Recon Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5376,
+        -192
+      ],
+      "notes": "Aggregate and parse all web reconnaissance findings"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "not-ipv4",
+              "leftValue": "={{ $json.target }}",
+              "rightValue": "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+              "operator": {
+                "type": "string",
+                "operation": "notRegex"
+              }
+            },
+            {
+              "id": "is-domain",
+              "leftValue": "={{ $json.target }}",
+              "rightValue": "^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\\.([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\\.)*[a-zA-Z]{2,}$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "domain-if-node",
+      "name": "Is Target a Domain?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        304
+      ],
+      "notes": "Checks if target is a domain (not an IP). TRUE = domain path, FALSE = IP path"
+    },
+    {
+      "parameters": {
+        "command": "=# Convert HTML to PDF using html2pdf helper\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $('1. Set Parameters').item.json.target }}\"\n\nhtml_file=\"/tmp/report_${timestamp}.html\"\npdf_file=\"/tmp/bug_bounty_report_${timestamp}.pdf\"\n\necho \"=== HTML TO PDF CONVERSION ===\"\n\n# Save HTML content to temporary file\ncat > \"$html_file\" << 'HTMLEOF'\n{{ $input.first().json.html }}\nHTMLEOF\n\necho \"✓ HTML saved: $html_file ($(wc -c < $html_file) bytes)\"\n\n# Convert using html2pdf helper script\nhtml2pdf \"$html_file\" \"$pdf_file\"\n\nif [ -f \"$pdf_file\" ]; then\n  echo \"✓ PDF generated: $pdf_file ($(wc -c < $pdf_file) bytes)\"\n  \n  # Output JSON for next node\n  echo \"{\\\"pdfPath\\\":\\\"$pdf_file\\\",\\\"filename\\\":\\\"bug_bounty_report_${target}_${timestamp}.pdf\\\",\\\"target\\\":\\\"$target\\\",\\\"timestamp\\\":\\\"$timestamp\\\"}\"\nelse\n  echo \"✗ PDF generation failed\"\n  exit 1\nfi"
+      },
+      "id": "html2pdf-converter",
+      "name": "Convert HTML to PDF",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        6160,
+        304
+      ],
+      "notes": "Convert HTML report to PDF using html2pdf helper script (WeasyPrint)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract JSON from stdout (last line)\nconst stdout = $input.first().json.stdout;\n\n// Get the last line which contains the JSON\nconst lines = stdout.trim().split('\\n');\nconst jsonLine = lines[lines.length - 1];\n\nconsole.log('Parsing JSON:', jsonLine);\n\nconst pdfInfo = JSON.parse(jsonLine);\n\nconsole.log('PDF Path:', pdfInfo.pdfPath);\nconsole.log('Filename:', pdfInfo.filename);\n\nreturn [{\n  json: {\n    pdfPath: pdfInfo.pdfPath,\n    filename: pdfInfo.filename,\n    target: pdfInfo.target,\n    timestamp: pdfInfo.timestamp\n  }\n}];"
+      },
+      "id": "parse-pdf-path",
+      "name": "Parse PDF Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6368,
+        304
+      ],
+      "notes": "Extract PDF path from command output"
+    },
+    {
+      "parameters": {
+        "command": "=# Merge and deduplicate subdomains from ALL sources\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\n\necho \"=== MERGING SUBDOMAIN RESULTS FROM ALL TOOLS ===\"\n\n# Extract subdomains from DNSRecon JSON\nif [ -f /tmp/dnsrecon_std_${timestamp}.json ]; then\n  cat /tmp/dnsrecon_std_${timestamp}.json 2>/dev/null | \\\n    jq -r '.[] | select(.type==\"A\" or .type==\"CNAME\") | .name' 2>/dev/null \\\n    > /tmp/dnsrecon_domains_${timestamp}.txt || touch /tmp/dnsrecon_domains_${timestamp}.txt\nelse\n  touch /tmp/dnsrecon_domains_${timestamp}.txt\nfi\n\n# Extract subdomains from theHarvester\nif [ -f /tmp/theharvester_${timestamp}.json ]; then\n  cat /tmp/theharvester_${timestamp}.json 2>/dev/null | \\\n    jq -r '.hosts[]?, .emails[]? | select(. != null)' 2>/dev/null | \\\n    cut -d'@' -f2 2>/dev/null \\\n    > /tmp/theharvester_domains_${timestamp}.txt || touch /tmp/theharvester_domains_${timestamp}.txt\nelse\n  touch /tmp/theharvester_domains_${timestamp}.txt\nfi\n\n# Combine ALL sources: subfinder, amass, dnsrecon, theharvester\ncat /tmp/subfinder_${timestamp}.txt \\\n    /tmp/amass_${timestamp}.txt \\\n    /tmp/dnsrecon_domains_${timestamp}.txt \\\n    /tmp/theharvester_domains_${timestamp}.txt 2>/dev/null | \\\n  sort -u | \\\n  grep -E '^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]\\.[a-zA-Z]{2,}$' \\\n  > /tmp/all_subdomains_${timestamp}.txt\n\nsubfinder_count=$(wc -l < /tmp/subfinder_${timestamp}.txt 2>/dev/null || echo 0)\namass_count=$(wc -l < /tmp/amass_${timestamp}.txt 2>/dev/null || echo 0)\ndnsrecon_count=$(wc -l < /tmp/dnsrecon_domains_${timestamp}.txt 2>/dev/null || echo 0)\ntheharvester_count=$(wc -l < /tmp/theharvester_domains_${timestamp}.txt 2>/dev/null || echo 0)\ntotal_count=$(wc -l < /tmp/all_subdomains_${timestamp}.txt)\n\necho \"Subfinder: $subfinder_count domains\"\necho \"Amass: $amass_count domains\"\necho \"DNSRecon: $dnsrecon_count domains\"\necho \"theHarvester: $theharvester_count domains\"\necho \"Total unique subdomains: $total_count\"\n\n# Output JSON for next node\ncat << JSONEOF\n{\"count\":$total_count,\"timestamp\":\"$timestamp\"}\nJSONEOF"
+      },
+      "id": "merge-subdomains-bash",
+      "name": "Merge & Deduplicate Subdomains",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2912,
+        -128
+      ],
+      "notes": "Combine results from subfinder and amass using bash"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "pdf-path",
+              "name": "pdfPath",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.pdfPath }}"
+            },
+            {
+              "id": "filename",
+              "name": "filename",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.filename }}"
+            },
+            {
+              "id": "target",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.target }}"
+            },
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.timestamp }}"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "type": "string",
+              "value": "=Scan complete! PDF report generated: {{ $('Parse PDF Path').first().json.filename }}. Located at: {{ $('Parse PDF Path').first().json.pdfPath }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "final-report-output",
+      "name": "Report Complete",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6560,
+        304
+      ],
+      "notes": "Final output with PDF location"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "1. Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-Set-Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-Set-Target": {
+      "main": [
+        [
+          {
+            "node": "1. Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-Set-Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form Trigger": {
+      "main": [
+        [
+          {
+            "node": "1. Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Install Security Tools": {
+      "main": [
+        [
+          {
+            "node": "Whois Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whois Lookup": {
+      "main": [
+        [
+          {
+            "node": "Subfinder Subdomain Enum",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Amass Subdomain Enum",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DNSRecon Advanced Enum",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "theHarvester OSINT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DNS Resolution (dig)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Probing (httpx) - Domain",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract Unique IPs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Probing (httpx) - Domain": {
+      "main": [
+        [
+          {
+            "node": "Parse httpx Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse httpx Results": {
+      "main": [
+        [
+          {
+            "node": "Nuclei Vulnerability Scan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "TestSSL Security Check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatWeb Technology Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nuclei Vulnerability Scan": {
+      "main": [
+        [
+          {
+            "node": "Parse Nuclei Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Unique IPs": {
+      "main": [
+        [
+          {
+            "node": "Nmap Stealth Port Scan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Naabu Fast Port Discovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nmap Stealth Port Scan": {
+      "main": [
+        [
+          {
+            "node": "Parse Nmap Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Nmap Results": {
+      "main": [
+        [
+          {
+            "node": "CVE Enrichment (NVD)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Nuclei Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare Comprehensive Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CVE Enrichment (NVD)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Comprehensive Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Comprehensive Report": {
+      "main": [
+        [
+          {
+            "node": "Generate Comprehensive HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Pre-Set-Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Naabu Fast Port Discovery": {
+      "main": [
+        [
+          {
+            "node": "Nmap Stealth Port Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wayback URLs Discovery": {
+      "main": [
+        [
+          {
+            "node": "Gobuster Directory Bruteforce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gobuster Directory Bruteforce": {
+      "main": [
+        [
+          {
+            "node": "TruffleHog Secrets Scanner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TruffleHog Secrets Scanner": {
+      "main": [
+        [
+          {
+            "node": "Parse Web Recon Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TestSSL Security Check": {
+      "main": [
+        [
+          {
+            "node": "Parse Web Recon Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatWeb Technology Detection": {
+      "main": [
+        [
+          {
+            "node": "Parse Web Recon Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Web Recon Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare Comprehensive Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Set Parameters": {
+      "main": [
+        [
+          {
+            "node": "Is Target a Domain?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Target a Domain?": {
+      "main": [
+        [
+          {
+            "node": "Install Security Tools",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nmap Stealth Port Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Comprehensive HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Convert HTML to PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert HTML to PDF": {
+      "main": [
+        [
+          {
+            "node": "Parse PDF Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subfinder Subdomain Enum": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Amass Subdomain Enum": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge & Deduplicate Subdomains": {
+      "main": [
+        [
+          {
+            "node": "DNS Resolution (dig)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wayback URLs Discovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DNSRecon Advanced Enum": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "theHarvester OSINT": {
+      "main": [
+        [
+          {
+            "node": "Merge & Deduplicate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Path": {
+      "main": [
+        [
+          {
+            "node": "Report Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "2dd37852-1cbb-4363-94c0-d83b62e682ce",
+  "meta": {
+    "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
+  },
+  "id": "hPFD75N1ZEMy0SIb",
+  "tags": []
+}

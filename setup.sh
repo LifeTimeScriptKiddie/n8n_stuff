@@ -692,6 +692,63 @@ verify_tools() {
     docker compose exec -T n8n-recon bash -c "fc-list | wc -l | xargs -I {} echo 'Fonts available: {}'" && print_success "Font system"
 
     echo ""
+    echo -e "${CYAN}Web Discovery & Crawling (Tier 1):${NC}"
+    docker compose exec -T n8n-recon bash -c "katana -version 2>&1 | head -1" && print_success "katana"
+    docker compose exec -T n8n-recon bash -c "which waybackurls" > /dev/null && print_success "waybackurls"
+    docker compose exec -T n8n-recon bash -c "which gau" > /dev/null && print_success "gau"
+    docker compose exec -T n8n-recon bash -c "gospider --version 2>&1 | head -1" && print_success "gospider"
+
+    echo ""
+    echo -e "${CYAN}Enhanced DNS Tools (Tier 1):${NC}"
+    docker compose exec -T n8n-recon bash -c "dnsx -version 2>&1 | head -1" && print_success "dnsx"
+    docker compose exec -T n8n-recon bash -c "puredns version 2>&1 | head -1" && print_success "puredns"
+    docker compose exec -T n8n-recon bash -c "massdns --help 2>&1 | head -1" && print_success "massdns (puredns dependency)"
+
+    echo ""
+    echo -e "${CYAN}Technology Detection (Tier 1):${NC}"
+    docker compose exec -T n8n-recon bash -c "wappalyzer --version 2>&1 | head -1" && print_success "wappalyzer"
+    docker compose exec -T n8n-recon bash -c "retire --version 2>&1 | head -1" && print_success "retire.js"
+    docker compose exec -T n8n-recon bash -c "whatweb --version 2>&1 | head -1" && print_success "WhatWeb"
+
+    echo ""
+    echo -e "${CYAN}Content Discovery (Tier 1):${NC}"
+    docker compose exec -T n8n-recon bash -c "ffuf -V 2>&1 | head -1" && print_success "ffuf"
+    docker compose exec -T n8n-recon bash -c "dirsearch --version 2>&1 | head -1" && print_success "dirsearch"
+    docker compose exec -T n8n-recon bash -c "gobuster version 2>&1 | head -1" && print_success "gobuster"
+
+    echo ""
+    echo -e "${CYAN}Port Scanning:${NC}"
+    docker compose exec -T n8n-recon bash -c "nmap --version 2>&1 | head -1" && print_success "nmap"
+    docker compose exec -T n8n-recon bash -c "naabu -version 2>&1 | head -1" && print_success "naabu"
+
+    echo ""
+    echo -e "${CYAN}API Discovery (Tier 2):${NC}"
+    docker compose exec -T n8n-recon bash -c "arjun --version 2>&1 | head -1" && print_success "arjun"
+
+    echo ""
+    echo -e "${CYAN}SSL/TLS Analysis (Tier 2):${NC}"
+    docker compose exec -T n8n-recon bash -c "tlsx -version 2>&1 | head -1" && print_success "tlsx"
+    docker compose exec -T n8n-recon bash -c "testssl.sh --version 2>&1 | head -1" && print_success "testssl.sh"
+
+    echo ""
+    echo -e "${CYAN}OSINT Tools:${NC}"
+    docker compose exec -T n8n-recon bash -c "theharvester --version 2>&1 | head -1" && print_success "theHarvester"
+    docker compose exec -T n8n-recon bash -c "dnsrecon --version 2>&1 | head -1" && print_success "dnsrecon"
+    docker compose exec -T n8n-recon bash -c "python3 -c 'import whois; print(\"python-whois:\", whois.__version__)' 2>&1" && print_success "python-whois"
+
+    echo ""
+    echo -e "${CYAN}Secret Scanning:${NC}"
+    docker compose exec -T n8n-recon bash -c "trufflehog --version 2>&1 | head -1" && print_success "trufflehog"
+
+    echo ""
+    echo -e "${CYAN}Cloud Discovery (Tier 3):${NC}"
+    docker compose exec -T n8n-recon bash -c "cloud_enum --version 2>&1 | head -1" && print_success "cloud_enum"
+
+    echo ""
+    echo -e "${CYAN}External APIs:${NC}"
+    docker compose exec -T n8n-recon bash -c "shodan version 2>&1 | head -1" && print_success "shodan"
+
+    echo ""
 }
 
 # ============================================================================
@@ -725,13 +782,20 @@ print_final_info() {
     echo -e "${CYAN}  INSTALLED TOOLS${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ${MAGENTA}Subdomain Enum:${NC}    subfinder, amass, assetfinder"
-    echo -e "  ${MAGENTA}Network Scan:${NC}      nmap (+vulners/vulscan), naabu"
-    echo -e "  ${MAGENTA}Web Fuzzing:${NC}       ffuf, katana, waybackurls, gau"
-    echo -e "  ${MAGENTA}Cred Testing:${NC}      NetExec (nxc), hydra"
+    echo -e "  ${MAGENTA}Subdomain Enum:${NC}    subfinder, amass"
+    echo -e "  ${MAGENTA}DNS Tools:${NC}         dnsx, puredns, massdns, dig, dnsrecon"
+    echo -e "  ${MAGENTA}Port Scanning:${NC}     nmap, naabu"
+    echo -e "  ${MAGENTA}Web Crawling:${NC}      katana, gospider, waybackurls, gau"
+    echo -e "  ${MAGENTA}Content Discovery:${NC} ffuf, gobuster, dirsearch"
+    echo -e "  ${MAGENTA}Tech Detection:${NC}    wappalyzer, WhatWeb, retire.js"
+    echo -e "  ${MAGENTA}API Discovery:${NC}     arjun"
+    echo -e "  ${MAGENTA}SSL/TLS Analysis:${NC}  tlsx, testssl.sh"
+    echo -e "  ${MAGENTA}OSINT:${NC}             theHarvester, dnsrecon, python-whois"
+    echo -e "  ${MAGENTA}Secret Scanning:${NC}   trufflehog"
+    echo -e "  ${MAGENTA}Cloud Discovery:${NC}   cloud_enum"
+    echo -e "  ${MAGENTA}External APIs:${NC}     shodan (CLI)"
     echo -e "  ${MAGENTA}Vuln Scanning:${NC}     nuclei (auto-updated templates)"
     echo -e "  ${MAGENTA}Exploitation:${NC}      sqlmap, searchsploit"
-    echo -e "  ${MAGENTA}Wordlists:${NC}         SecLists (complete collection)"
     echo -e "  ${MAGENTA}PDF Generation:${NC}    WeasyPrint + html2pdf helper"
     echo ""
 

@@ -189,8 +189,130 @@ RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && 
     go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest && \
     go install github.com/owasp-amass/amass/v4/...@master
 
-# Copy Go binaries to /usr/local/bin for global access
-RUN cp /root/go/bin/* /usr/local/bin/
+# ============================================
+# TIER 1: Web Discovery & Crawling Tools
+# ============================================
+RUN echo "Installing Tier 1: Web Discovery Tools..." && \
+    go install github.com/projectdiscovery/katana/cmd/katana@latest && \
+    go install github.com/tomnomnom/waybackurls@latest && \
+    go install github.com/lc/gau/v2/cmd/gau@latest && \
+    go install github.com/jaeles-project/gospider@latest
+
+# ============================================
+# TIER 1: Enhanced DNS Tools
+# ============================================
+RUN echo "Installing Tier 1: DNS Tools..." && \
+    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest && \
+    go install github.com/d3mondev/puredns/v2@latest && \
+    git clone --depth 1 https://github.com/blechschmidt/massdns.git /tmp/massdns && \
+    cd /tmp/massdns && make && cp bin/massdns /usr/local/bin/ && \
+    chmod +x /usr/local/bin/massdns && \
+    cd / && rm -rf /tmp/massdns
+
+# Create default DNS resolvers file for puredns/massdns
+RUN echo "Installing DNS resolvers..." && \
+    mkdir -p /usr/share/dns-resolvers && \
+    echo "8.8.8.8
+8.8.4.4
+1.1.1.1
+1.0.0.1
+9.9.9.9
+149.112.112.112
+208.67.222.222
+208.67.220.220" > /usr/share/dns-resolvers/resolvers.txt && \
+    ln -s /usr/share/dns-resolvers/resolvers.txt /tmp/resolvers.txt
+
+# ============================================
+# TIER 1: Technology Detection
+# ============================================
+RUN echo "Installing Tier 1: Technology Detection..." && \
+    npm install -g wappalyzer retire && \
+    apk add --no-cache ruby ruby-dev && \
+    git clone --depth 1 https://github.com/urbanadventurer/WhatWeb.git /opt/WhatWeb && \
+    ln -s /opt/WhatWeb/whatweb /usr/local/bin/whatweb && \
+    chmod +x /opt/WhatWeb/whatweb
+
+# ============================================
+# TIER 1: Content Discovery
+# ============================================
+RUN echo "Installing Tier 1: Content Discovery..." && \
+    go install github.com/ffuf/ffuf/v2@latest && \
+    pip3 install --no-cache-dir --break-system-packages dirsearch
+
+# ============================================
+# TIER 2: API Discovery
+# ============================================
+RUN echo "Installing Tier 2: API Discovery..." && \
+    pip3 install --no-cache-dir --break-system-packages arjun
+
+# ============================================
+# TIER 2: SSL/TLS Analysis
+# ============================================
+RUN echo "Installing Tier 2: SSL/TLS Analysis..." && \
+    go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest && \
+    git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl && \
+    ln -s /opt/testssl/testssl.sh /usr/local/bin/testssl && \
+    chmod +x /opt/testssl/testssl.sh
+
+# ============================================
+# TIER 2: Visual Reconnaissance
+# ============================================
+# Note: gowitness requires Go 1.25+, skipping for now
+# RUN echo "Installing Tier 2: Visual Recon..." && \
+#     go install github.com/sensepost/gowitness@latest
+
+# ============================================
+# TIER 3: Cloud Discovery
+# ============================================
+RUN echo "Installing Tier 3: Cloud Discovery..." && \
+    git clone --depth 1 https://github.com/initstring/cloud_enum.git /opt/cloud_enum && \
+    ln -s /opt/cloud_enum/cloud_enum.py /usr/local/bin/cloud_enum && \
+    chmod +x /opt/cloud_enum/cloud_enum.py && \
+    pip3 install --no-cache-dir --break-system-packages -r /opt/cloud_enum/requirements.txt
+
+# ============================================
+# ADDITIONAL TOOLS: Port Scanning
+# ============================================
+RUN echo "Installing Additional Port Scanning Tools..." && \
+    go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest && \
+    apk add --no-cache libpcap-dev
+
+# ============================================
+# ADDITIONAL TOOLS: Directory Discovery
+# ============================================
+RUN echo "Installing Additional Directory Discovery Tools..." && \
+    apk add --no-cache gobuster
+
+# ============================================
+# ADDITIONAL TOOLS: DNS Enumeration
+# ============================================
+RUN echo "Installing Additional DNS Tools..." && \
+    pip3 install --no-cache-dir --break-system-packages dnsrecon
+
+# ============================================
+# ADDITIONAL TOOLS: OSINT
+# ============================================
+RUN echo "Installing Additional OSINT Tools..." && \
+    pip3 install --no-cache-dir --break-system-packages theHarvester python-whois
+
+# ============================================
+# ADDITIONAL TOOLS: Secret Scanning
+# ============================================
+RUN echo "Installing TruffleHog..." && \
+    pip3 install --no-cache-dir --break-system-packages truffleHog
+
+# ============================================
+# ADDITIONAL TOOLS: Shodan CLI
+# ============================================
+RUN echo "Installing Shodan CLI..." && \
+    pip3 install --no-cache-dir --break-system-packages shodan && \
+    ln -s /home/node/.local/bin/shodan /usr/local/bin/shodan || true
+
+# Fix testssl.sh symlink
+RUN ln -sf /opt/testssl/testssl.sh /usr/local/bin/testssl.sh
+
+# Copy all Go binaries to /usr/local/bin for global access
+RUN cp /root/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
 # Update nuclei templates
 RUN nuclei -update-templates

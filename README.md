@@ -190,15 +190,52 @@ Tools are installed on-demand when the AI requests them. No need to pre-install 
 
 ## Available Tools
 
-| Category | Tools |
-|----------|-------|
-| **Port Scanning** | `nmap` (quick/full/stealth/UDP), `naabu` |
-| **DNS & Subdomain** | `subfinder`, `amass`, `dig`, `dnsrecon`, `fierce` |
-| **Web Recon** | `httpx`, `nuclei`, `gobuster`, `whatweb`, `testssl.sh`, `waybackurls` |
-| **OSINT** | `whois`, `theHarvester` |
-| **Cloud** | `aws-cli`, cloud nuclei templates |
-| **Secrets** | `trufflehog`, `gitleaks` |
-| **PDF Generation** | `WeasyPrint`, `html2pdf` helper script |
+### **Core Attack Surface Discovery**
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **Subdomain Enumeration** | `subfinder`, `amass` | Discover subdomains from multiple sources |
+| **DNS Intelligence** | `dnsx`, `puredns`, `massdns`, `dig`, `dnsrecon` | DNS validation, bruteforce, resolution |
+| **Port Scanning** | `nmap`, `naabu` | Service discovery, version detection |
+| **HTTP Probing** | `httpx` | Fast HTTP probe with tech detection |
+
+### **Web Application Assessment**
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **Web Crawling** | `katana`, `gospider`, `waybackurls`, `gau` | Deep web app mapping, historical URLs |
+| **Content Discovery** | `ffuf`, `gobuster`, `dirsearch` | Find hidden files, directories, endpoints |
+| **Technology Detection** | `wappalyzer`, `WhatWeb`, `retire.js` | Identify frameworks, libraries, versions |
+| **API Discovery** | `arjun` | Find API endpoints, discover parameters |
+
+### **Security Analysis**
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **Vulnerability Scanning** | `nuclei` | Template-based vulnerability detection |
+| **SSL/TLS Analysis** | `tlsx`, `testssl.sh` | Certificate analysis, TLS configuration |
+| **Secret Scanning** | `trufflehog` | Find exposed credentials and secrets |
+| **Exploitation** | `sqlmap`, `searchsploit` (ExploitDB) | SQL injection, exploit database |
+
+### **OSINT & Intelligence**
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **OSINT** | `theHarvester`, `dnsrecon`, `python-whois` | Email discovery, data gathering, WHOIS lookups |
+| **External APIs** | `shodan` | Search engine for Internet-connected devices |
+
+### **Cloud & Infrastructure**
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **Cloud Discovery** | `cloud_enum` | Find cloud resources (AWS, Azure, GCP) |
+| **Cloud Security** | Azure CLI, ScoutSuite, ROADrecon | Cloud platform auditing |
+
+### **Reporting & Utilities**
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **PDF Generation** | `WeasyPrint`, `html2pdf` | Professional PDF reports |
 
 ## PDF Report Generation
 
@@ -316,6 +353,289 @@ The system includes comprehensive font support:
 Check available fonts:
 ```bash
 docker exec n8n_recon_hub fc-list
+```
+
+## Enhanced Attack Surface Scanning Tools
+
+The platform includes comprehensive attack surface management tools across all tiers.
+
+### **Tier 1: Web Discovery & Crawling**
+
+#### **katana** - Advanced Web Crawler
+```bash
+# Basic crawl
+docker exec n8n_recon_hub katana -u https://target.com
+
+# JS-aware crawling with depth 3
+docker exec n8n_recon_hub katana -u https://target.com -jc -d 3 -silent
+
+# Crawl with output
+docker exec n8n_recon_hub katana -u https://target.com -o /tmp/urls.txt
+```
+
+#### **waybackurls** - Historical URL Discovery
+```bash
+# Get URLs from Wayback Machine
+docker exec n8n_recon_hub waybackurls target.com > /tmp/historical-urls.txt
+
+# Pipe to grep for interesting paths
+docker exec n8n_recon_hub bash -c "waybackurls target.com | grep -i admin"
+```
+
+#### **gau** - GetAllUrls from Multiple Sources
+```bash
+# Fetch URLs from AlienVault, Wayback, Common Crawl
+docker exec n8n_recon_hub gau target.com
+
+# Filter by blacklist
+docker exec n8n_recon_hub gau --blacklist png,jpg,gif target.com
+```
+
+#### **gospider** - Fast Web Spider
+```bash
+# Quick spider with depth 2
+docker exec n8n_recon_hub gospider -s https://target.com -d 2 -c 10
+```
+
+### **Tier 1: DNS Intelligence**
+
+#### **dnsx** - DNS Toolkit
+```bash
+# Resolve subdomains with A records
+docker exec n8n_recon_hub dnsx -l subs.txt -a -resp
+
+# Get CNAME records
+docker exec n8n_recon_hub dnsx -l subs.txt -cname
+
+# JSON output
+docker exec n8n_recon_hub dnsx -l subs.txt -json -o /tmp/resolved.json
+```
+
+#### **puredns** - DNS Bruteforce & Validation
+```bash
+# Bruteforce subdomains
+docker exec n8n_recon_hub puredns bruteforce /opt/SecLists/Discovery/DNS/subdomains-top1million-5000.txt target.com
+
+# Resolve and validate
+docker exec n8n_recon_hub puredns resolve subs.txt -r /etc/resolv.conf
+```
+
+### **Tier 1: Technology Detection**
+
+#### **wappalyzer** - Technology Stack Fingerprinting
+```bash
+# Detect technologies
+docker exec n8n_recon_hub wappalyzer https://target.com
+
+# JSON output
+docker exec n8n_recon_hub wappalyzer https://target.com --pretty
+```
+
+#### **WhatWeb** - Web Technology Identifier
+```bash
+# Aggressive scan
+docker exec n8n_recon_hub whatweb -a 3 https://target.com
+
+# Scan multiple URLs
+docker exec n8n_recon_hub whatweb -i urls.txt
+```
+
+#### **retire.js** - Detect Vulnerable JavaScript Libraries
+```bash
+# Scan a directory
+docker exec n8n_recon_hub retire --path /tmp/js-files
+
+# Scan with verbose output
+docker exec n8n_recon_hub retire --verbose --path /tmp/js
+```
+
+### **Tier 1: Content Discovery**
+
+#### **ffuf** - Fast Web Fuzzer
+```bash
+# Directory fuzzing
+docker exec n8n_recon_hub ffuf -u https://target.com/FUZZ -w /opt/SecLists/Discovery/Web-Content/common.txt
+
+# Virtual host discovery
+docker exec n8n_recon_hub ffuf -u https://target.com -H "Host: FUZZ.target.com" -w /opt/SecLists/Discovery/DNS/subdomains-top1million-5000.txt
+
+# Parameter fuzzing
+docker exec n8n_recon_hub ffuf -u https://target.com/api?FUZZ=value -w /opt/SecLists/Discovery/Web-Content/burp-parameter-names.txt
+```
+
+#### **feroxbuster** - Recursive Content Discovery
+```bash
+# Recursive scan
+docker exec n8n_recon_hub feroxbuster -u https://target.com -w /opt/SecLists/Discovery/Web-Content/common.txt
+
+# With extensions
+docker exec n8n_recon_hub feroxbuster -u https://target.com -x php,asp,aspx,jsp -w wordlist.txt
+
+# Rate limited
+docker exec n8n_recon_hub feroxbuster -u https://target.com --rate-limit 10
+```
+
+#### **dirsearch** - Web Path Scanner
+```bash
+# Basic scan
+docker exec n8n_recon_hub dirsearch -u https://target.com
+
+# With extensions and threads
+docker exec n8n_recon_hub dirsearch -u https://target.com -e php,asp,aspx -t 50
+
+# Exclude status codes
+docker exec n8n_recon_hub dirsearch -u https://target.com -x 403,404
+```
+
+### **Tier 2: API Discovery**
+
+#### **kiterunner** - API Endpoint Discovery
+```bash
+# Scan API endpoints
+docker exec n8n_recon_hub kr scan https://target.com/api -w /usr/local/share/kiterunner/routes.json
+
+# Brute force
+docker exec n8n_recon_hub kr brute https://target.com -w wordlist.txt
+```
+
+#### **arjun** - HTTP Parameter Discovery
+```bash
+# Discover GET parameters
+docker exec n8n_recon_hub arjun -u https://target.com/api/user
+
+# POST parameters
+docker exec n8n_recon_hub arjun -u https://target.com/api/login -m POST
+
+# Custom wordlist
+docker exec n8n_recon_hub arjun -u https://target.com/api -w params.txt
+```
+
+### **Tier 2: SSL/TLS Analysis**
+
+#### **tlsx** - TLS Data Extraction
+```bash
+# Get TLS info
+docker exec n8n_recon_hub tlsx -u target.com -json
+
+# Scan multiple hosts
+docker exec n8n_recon_hub tlsx -l hosts.txt -san -cn -org
+
+# Check certificate expiry
+docker exec n8n_recon_hub tlsx -u target.com -expired
+```
+
+#### **testssl.sh** - Comprehensive SSL/TLS Testing
+```bash
+# Full test
+docker exec n8n_recon_hub testssl --full https://target.com
+
+# Check for vulnerabilities only
+docker exec n8n_recon_hub testssl --vuln https://target.com
+
+# JSON output
+docker exec n8n_recon_hub testssl --jsonfile /tmp/ssl-results.json https://target.com
+```
+
+### **Tier 2: Visual Reconnaissance**
+
+#### **gowitness** - Web Screenshot Utility
+```bash
+# Single URL screenshot
+docker exec n8n_recon_hub gowitness single https://target.com
+
+# Multiple URLs from file
+docker exec n8n_recon_hub gowitness file -f urls.txt --screenshot-path /tmp/screenshots
+
+# With report
+docker exec n8n_recon_hub gowitness file -f urls.txt --write-db --db-path /tmp/gowitness.db
+```
+
+### **Tier 3: Cloud Discovery**
+
+#### **cloud_enum** - Multi-Cloud OSINT Tool
+```bash
+# Enumerate cloud resources
+docker exec n8n_recon_hub cloud_enum -k target
+
+# Specific provider
+docker exec n8n_recon_hub cloud_enum -k target --aws-only
+
+# With output
+docker exec n8n_recon_hub cloud_enum -k target -l /tmp/cloud-enum.txt
+```
+
+#### **S3Scanner** - S3 Bucket Scanner
+```bash
+# Scan single bucket
+docker exec n8n_recon_hub S3Scanner scan -b target-bucket
+
+# Scan from list
+docker exec n8n_recon_hub S3Scanner scan -f buckets.txt
+
+# Check for public access
+docker exec n8n_recon_hub S3Scanner dump -b target-bucket -d /tmp/s3-dump
+```
+
+### **Using Tools in n8n Workflows**
+
+**Execute Command Node Example:**
+
+```bash
+# Comprehensive subdomain discovery
+subfinder -d target.com -silent | \
+dnsx -silent -a -resp | \
+httpx -silent -tech-detect -json | \
+tee /tmp/live-hosts.json
+```
+
+**Code Node Example (Parse Results):**
+
+```javascript
+// Parse technology detection results
+const results = JSON.parse($json.output);
+const technologies = results.map(r => ({
+  url: r.url,
+  statusCode: r['status-code'],
+  technologies: r.tech || [],
+  server: r.webserver || 'unknown'
+}));
+
+return technologies;
+```
+
+### **Tool Combinations for Maximum Coverage**
+
+#### **Complete Subdomain Discovery:**
+```bash
+# Combine multiple tools
+subfinder -d target.com -silent > subs.txt
+amass enum -passive -d target.com >> subs.txt
+assetfinder --subs-only target.com >> subs.txt
+
+# Validate and resolve
+cat subs.txt | sort -u | dnsx -silent -a -resp > validated.txt
+```
+
+#### **Deep Web Application Mapping:**
+```bash
+# Crawl + historical + content discovery
+katana -u https://target.com -silent > crawled.txt
+waybackurls target.com >> crawled.txt
+gau target.com >> crawled.txt
+
+# Unique URLs
+cat crawled.txt | sort -u > all-urls.txt
+
+# Fuzz for hidden content
+ffuf -u https://target.com/FUZZ -w wordlist.txt -mc 200,301,302
+```
+
+#### **API Comprehensive Assessment:**
+```bash
+# Discover + test APIs
+kr scan https://target.com/api -w routes.json > endpoints.txt
+arjun -u https://target.com/api/user -oJ params.json
+nuclei -l endpoints.txt -t /root/nuclei-templates/http/
 ```
 
 ## Quick Start

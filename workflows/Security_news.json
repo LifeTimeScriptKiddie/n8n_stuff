@@ -1,0 +1,688 @@
+{
+  "name": "Security News Aggregator - Updated",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -448,
+        112
+      ],
+      "id": "c42334ac-252f-4db9-9dcf-9fd09df18888",
+      "name": "Every 12 Hours"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -448,
+        288
+      ],
+      "id": "7875484a-d987-4c99-8f78-b769ed8bcc5e",
+      "name": "Chat: Get Security News",
+      "webhookId": "security-news-chat"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        480
+      ],
+      "id": "505e8b1c-f68a-42e8-b89e-ca6804cd782c",
+      "name": "Manual Run",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.format('yyyyMMdd_HHmmss') }}"
+            },
+            {
+              "id": "date",
+              "name": "date",
+              "type": "string",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -224,
+        288
+      ],
+      "id": "b6f488ef-b7f5-4a78-9136-8943c1b3fb4c",
+      "name": "Set Parameters"
+    },
+    {
+      "parameters": {
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pubStartDate",
+              "value": "={{ $now.minus({days: 1}).toFormat('yyyy-MM-dd\\'T\\'00:00:00.000') }}"
+            },
+            {
+              "name": "pubEndDate",
+              "value": "={{ $now.toFormat('yyyy-MM-dd\\'T\\'23:59:59.999') }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f3be7a6d-9c4a-4403-a93a-03c555d20fcb",
+      "name": "NVD Recent CVEs"
+    },
+    {
+      "parameters": {
+        "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        176
+      ],
+      "id": "aa71244e-0666-4ce1-83bd-c441869646d9",
+      "name": "CISA Exploited CVEs"
+    },
+    {
+      "parameters": {
+        "resource": "all",
+        "additionalFields": {
+          "keyword": ""
+        }
+      },
+      "type": "n8n-nodes-base.hackerNews",
+      "typeVersion": 1,
+      "position": [
+        0,
+        720
+      ],
+      "id": "92aa758c-1e3e-4d1f-8897-bd6395b44de1",
+      "name": "Hacker News Items"
+    },
+    {
+      "parameters": {
+        "url": "https://blog.badsectorlabs.com/feeds/all.atom.xml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        352
+      ],
+      "id": "f1740553-1780-4c1a-9cee-e035af9ec9e4",
+      "name": "Bad Sector Labs RSS"
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=telecom+breach+OR+telecommunications+hack+OR+infrastructure+attack+when:1d",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        880
+      ],
+      "id": "8168f1a2-6f2b-491e-9634-32cc6119d3b8",
+      "name": "Google News: Telecom/Infrastructure"
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=AI+attack+infrastructure+OR+AI+powered+hack+OR+machine+learning+attack+when:1d",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        1008
+      ],
+      "id": "585b6bc9-519e-4080-9cbc-73fc59dbb738",
+      "name": "Google News: AI Attacks"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse NVD CVE data (unchanged)\nconst nvdData = $input.first().json;\nconst items = [];\n\nif (nvdData.vulnerabilities) {\n for (const vuln of nvdData.vulnerabilities.slice(0, 20)) {\n const cve = vuln.cve;\n const cveId = cve.id;\n const published = cve.published;\n const description = cve.descriptions?.find(d => d.lang === 'en')?.value || 'No description';\n \n const metrics = cve.metrics || {};\n const cvssV31 = metrics.cvssMetricV31?.[0]?.cvssData;\n const cvssV30 = metrics.cvssMetricV30?.[0]?.cvssData;\n const cvssData = cvssV31 || cvssV30 || {};\n const cvssScore = cvssData.baseScore || 0;\n const severity = cvssData.baseSeverity || 'UNKNOWN';\n \n items.push({\n source: 'NVD',\n category: 'CVE',\n severity: severity,\n cvssScore: cvssScore,\n title: cveId,\n description: description.substring(0, 200),\n url: `https://nvd.nist.gov/vuln/detail/${cveId}`,\n publishedDate: published,\n timestamp: new Date(published).getTime()\n });\n }\n}\n\nreturn items.map(item => ({json: item}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "e22eb445-b933-4b92-808c-0cc40c09125c",
+      "name": "Parse NVD"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse CISA KEV data (unchanged)\nconst cisaData = $input.first().json;\nconst items = [];\n\nif (cisaData.vulnerabilities) {\n const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);\n \n for (const vuln of cisaData.vulnerabilities) {\n const addedDate = new Date(vuln.dateAdded).getTime();\n \n if (addedDate > oneDayAgo) {\n items.push({\n source: 'CISA KEV',\n category: 'EXPLOITED',\n severity: 'CRITICAL',\n cvssScore: 10,\n title: `${vuln.cveID} - ${vuln.vulnerabilityName}`,\n description: `${vuln.shortDescription}. Vendor: ${vuln.vendorProject}. Product: ${vuln.product}`,\n url: `https://nvd.nist.gov/vuln/detail/${vuln.cveID}`,\n publishedDate: vuln.dateAdded,\n timestamp: addedDate,\n exploited: true,\n dueDate: vuln.dueDate\n });\n }\n }\n}\n\nreturn items.map(item => ({json: item}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        176
+      ],
+      "id": "5931b109-511e-4cf7-a8c8-f8c84eca2179",
+      "name": "Parse CISA"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generic RSS parser for news feeds (BleepingComputer, BadSector, Google News)\nconst items = $input.all();\nconst results = [];\nconst oneDayAgo = Date.now() - 24*60*60*1000;\n\nfor (const item of items) {\n  const json = item.json;\n  const title = json.title || '';\n  const link = json.link || json.url || '';\n  const pubDate = json.isoDate || json.pubDate || new Date().toISOString();\n  const timestamp = new Date(pubDate).getTime();\n  const description = (json.description || json.summary || '').replace(/<[^>]*>/g, '').substring(0, 200);\n\n  if (timestamp > oneDayAgo && link) {\n    results.push({\n      source: json.source || 'RSS Feed',\n      category: 'NEWS',\n      severity: 'INFO',\n      cvssScore: 0,\n      title,\n      description,\n      url: link,\n      publishedDate: pubDate,\n      timestamp\n    });\n  }\n}\n\nreturn results.map(r => ({json: r}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        368
+      ],
+      "id": "94e526ad-c782-4bc1-a7fb-8aa66fbe2a6e",
+      "name": "Parse RSS Feeds"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Hacker News (unchanged but simplified)\nconst inputItems = $input.all();\nconst results = [];\nconst keywordRegex = /\\b(cve|zero[- ]day|0day|breach|leak|exposed|exploit|rce|auth bypass|malware|ransomware|hacked|compromised|supply[- ]chain|backdoor)\\b/i;\nconst oneDayAgo = Date.now() - 24*60*60*1000;\n\nfor (const item of inputItems) {\n  const json = item.json;\n  const title = (json.title || '').toLowerCase();\n  const timestamp = (json.time || Date.now()) * 1000;\n\n  if (timestamp > oneDayAgo && keywordRegex.test(title)) {\n    let relevance = 0;\n    if (/cve-\\d{4}-\\d+/i.test(title)) relevance += 5;\n    if (/\\b(breach|exploit|rce|0day|zero[- ]day)\\b/i.test(title)) relevance += 3;\n\n    const severity = relevance >= 5 ? 'HIGH' : relevance >= 3 ? 'MEDIUM' : 'LOW';\n\n    results.push({\n      source: 'Hacker News',\n      category: 'NEWS',\n      severity,\n      cvssScore: 0,\n      title: json.title,\n      description: json.text || '',\n      url: `https://news.ycombinator.com/item?id=${json.id}`,\n      publishedDate: new Date(timestamp).toISOString(),\n      timestamp\n    });\n  }\n}\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        704
+      ],
+      "id": "907875f8-f4c5-4830-99f3-f1b5cb1af387",
+      "name": "Parse Hacker News"
+    },
+    {
+      "parameters": {
+        "numberInputs": 6
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        544,
+        336
+      ],
+      "id": "da63f723-2787-47cb-9ae6-c17615307df4",
+      "name": "Merge All Sources",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate, rank, categorize + simple deduplication\nconst allItems = $input.all().map(i => i.json);\n\n// Deduplicate by URL or similar title\nconst seen = new Set();\nconst unique = [];\nfor (const item of allItems) {\n  const key = item.url || item.title.substring(0, 50);\n  if (!seen.has(key)) {\n    seen.add(key);\n    unique.push(item);\n  }\n}\n\n// Sort & categorize (unchanged logic)\nconst ranked = unique.sort((a, b) => {\n  const severityRank = {'EXPLOITED': 10, 'AI_ATTACK': 9, 'TELECOM': 8, 'INFRASTRUCTURE': 7, 'CRITICAL': 6, 'HIGH': 4, 'MEDIUM': 2, 'LOW': 1, 'INFO': 0};\n  return (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0) || (b.timestamp - a.timestamp);\n});\n\nconst categorized = {\n  exploited: ranked.filter(i => i.category === 'EXPLOITED'),\n  aiAttacks: ranked.filter(i => i.category === 'AI_ATTACK'),\n  telecom: ranked.filter(i => i.category === 'TELECOM'),\n  infrastructure: ranked.filter(i => i.category === 'INFRASTRUCTURE'),\n  critical: ranked.filter(i => i.category === 'CVE' && i.cvssScore >= 9.0),\n  high: ranked.filter(i => i.category === 'CVE' && i.cvssScore >= 7.0 && i.cvssScore < 9.0),\n  medium: ranked.filter(i => i.category === 'CVE' && i.cvssScore >= 4.0 && i.cvssScore < 7.0),\n  news: ranked.filter(i => i.category === 'NEWS')\n};\n\nconst summary = {\n  timestamp: $('Set Parameters').first().json.timestamp,\n  date: $('Set Parameters').first().json.date,\n  totalItems: unique.length,\n  counts: Object.fromEntries(Object.keys(categorized).map(k => [k, categorized[k].length])),\n  items: categorized\n};\n\nreturn [{json: summary}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        272
+      ],
+      "id": "6145e0f6-bc60-4a37-8b84-2b7e8ca55e72",
+      "name": "Aggregate & Rank"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate ENHANCED HTML report - BLACK TEXT HEADER (CALM & PROFESSIONAL)\nconst data = $input.first().json;\nconst { date, timestamp, totalItems, counts, items } = data;\n\nconsole.log('=== GENERATING CALM BLACK-TEXT HTML REPORT ===');\n\nfunction severityBadge(severity) {\n  const colors = {\n    'CRITICAL': '#d32f2f',\n    'HIGH': '#ff5722',\n    'MEDIUM': '#ff9800',\n    'LOW': '#4caf50',\n    'INFO': '#2196f3'\n  };\n  const bg = colors[severity] || '#666';\n  return `<span style=\"background:${bg}; color:white; padding:5px 12px; border-radius:5px; font-size:12px; font-weight:bold; text-shadow: 0 1px 2px rgba(0,0,0,0.3);\">${severity}</span>`;\n}\n\nfunction categoryBadge(category) {\n  const badges = {\n    'EXPLOITED': '⚠️ EXPLOITED',\n    'AI_ATTACK': '🤖 AI ATTACK',\n    'TELECOM': '📡 TELECOM',\n    'INFRASTRUCTURE': '🏭 INFRASTRUCTURE',\n    'CVE': '🔒 CVE',\n    'NEWS': '📰 NEWS'\n  };\n  return `<span style=\"background:#333; color:white; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:600;\">${badges[category] || category}</span>`;\n}\n\nfunction renderItems(itemList, limit = 20, showSource = true) {\n  if (!itemList || itemList.length === 0) {\n    return '<p style=\"color:#777; font-style:italic; padding:20px; text-align:center; background:#f9f9f9; border-radius:8px;\">No items in this category</p>';\n  }\n\n  let html = '<div style=\"margin:20px 0\">';\n  for (const item of itemList.slice(0, limit)) {\n    const scoreDisplay = item.cvssScore > 0 ? `CVSS: ${item.cvssScore.toFixed(1)} | ` : '';\n    const sourceDisplay = showSource ? `<span style=\"color:#555; font-size:13px; margin-left:10px; font-weight:500;\">• ${item.source}</span>` : '';\n    const alertBorder = item.specialAlert || item.category === 'EXPLOITED' || item.severity === 'CRITICAL' ? '#c62828' : '#1565c0';\n\n    html += `\n      <div style=\"background:#f8fbff; padding:18px; margin:14px 0; border-left:6px solid ${alertBorder}; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08);\">\n        <div style=\"margin-bottom:12px; display:flex; align-items:center; flex-wrap:wrap; gap:10px;\">\n          ${severityBadge(item.severity)}\n          ${categoryBadge(item.category)}\n          ${sourceDisplay}\n        </div>\n        <h4 style=\"margin:10px 0; line-height:1.5; font-size:17px;\">\n          <a href=\"${item.url}\" target=\"_blank\" style=\"color:#1565c0; text-decoration:none; font-weight:600;\">\n            ${item.title}\n          </a>\n        </h4>\n        <p style=\"color:#333; font-size:14.5px; margin:8px 0 14px 0; line-height:1.6;\">\n          ${item.description || '<em style=\"color:#777;\">No description available</em>'}\n        </p>\n        <div style=\"color:#666; font-size:12px; font-weight:500;\">\n          ${scoreDisplay}${new Date(item.publishedDate).toLocaleString()}\n        </div>\n      </div>`;\n  }\n  html += '</div>';\n  return html;\n}\n\nconst hasCriticalAlerts = counts.exploited > 0 || counts.aiAttacks > 0 || counts.telecom > 0 || counts.infrastructure > 0;\n\nconst html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Security Update - ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</title>\n  <style>\n    body { \n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; \n      line-height: 1.7; \n      color: #2d2d2d; \n      background: #eef2f6; \n      margin: 0; \n      padding: 20px; \n    }\n    .container { \n      max-width: 1200px; \n      margin: 0 auto; \n      background: white; \n      padding: 40px; \n      border-radius: 16px; \n      box-shadow: 0 8px 30px rgba(0,0,0,0.12); \n    }\n    .header {\n      background: linear-gradient(135deg, ${hasCriticalAlerts ? '#c62828' : '#1565c0'} 0%, ${hasCriticalAlerts ? '#8a1c1c' : '#0d47a1'} 100%);\n      padding: 60px 40px;\n      margin: -40px -40px 50px -40px;\n      border-radius: 16px 16px 0 0;\n      text-align: center;\n    }\n    .header h1 { \n      margin: 0 0 15px 0; \n      font-size: 42px; \n      font-weight: 900; \n      color: #000000; \n      letter-spacing: 1px;\n      text-shadow: 0 2px 4px rgba(255,255,255,0.4);\n    }\n    .header .date-line { \n      margin: 0 0 20px 0; \n      font-size: 24px; \n      font-weight: 600; \n      color: #222222;\n    }\n    .header .items-processed { \n      margin: 0; \n      font-size: 22px; \n      font-weight: 500; \n      color: #333333;\n    }\n    .header .items-processed strong { \n      color: #000000; \n      font-size: 28px; \n      font-weight: 700;\n    }\n\n    .stats { \n      display: grid; \n      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); \n      gap: 18px; \n      margin: 35px 0; \n    }\n    .stat { \n      background: #f8fbff; \n      padding: 24px; \n      border-radius: 12px; \n      text-align: center; \n      border: 1px solid #e0e0e0;\n    }\n    .stat-value { \n      font-size: 36px; \n      font-weight: bold; \n      margin-bottom: 8px; \n    }\n    .stat-label { \n      font-size: 13px; \n      color: #555; \n      text-transform: uppercase; \n      letter-spacing: 1px; \n      font-weight: 600;\n    }\n    \n    h2 { \n      color: #1565c0; \n      font-size: 26px; \n      margin: 55px 0 25px 0; \n      padding-bottom: 14px; \n      border-bottom: 4px solid #e3f2fd; \n      font-weight: 700;\n    }\n    \n    .section { margin-bottom: 50px; }\n    \n    .footer { \n      text-align: center; \n      margin-top: 90px; \n      padding: 35px; \n      background: #f8fbff; \n      border-radius: 12px; \n      color: #555; \n      font-size: 14px; \n      border-top: 3px solid #e3f2fd;\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>Security Update</h1>\n      <p class=\"date-line\">${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>\n      <p class=\"items-processed\"><strong>${totalItems}</strong> security items processed</p>\n    </div>\n\n    <!-- No alert banner or elevated threat message -->\n\n    <h2>📊 Executive Summary</h2>\n    <div class=\"stats\">\n      <div class=\"stat\">\n        <div class=\"stat-value\" style=\"color:#1565c0;\">${totalItems}</div>\n        <div class=\"stat-label\">Total Items</div>\n      </div>\n      <div class=\"stat\">\n        <div class=\"stat-value\" style=\"color:#c62828;\">${counts.exploited || 0}</div>\n        <div class=\"stat-label\">Actively Exploited</div>\n      </div>\n      <div class=\"stat\">\n        <div class=\"stat-value\" style=\"color:#d32f2f;\">${counts.aiAttacks || 0}</div>\n        <div class=\"stat-label\">AI Threats</div>\n      </div>\n      <div class=\"stat\">\n        <div class=\"stat-value\" style=\"color:#ff6d00;\">${(counts.telecom || 0) + (counts.infrastructure || 0)}</div>\n        <div class=\"stat-label\">Strategic Sectors</div>\n      </div>\n      <div class=\"stat\">\n        <div class=\"stat-value\" style=\"color:#d32f2f;\">${counts.critical || 0}</div>\n        <div class=\"stat-label\">Critical CVEs</div>\n      </div>\n      <div class=\"stat\">\n        <div class=\"stat-value\" style=\"color:#ff9800;\">${counts.high || 0}</div>\n        <div class=\"stat-label\">High CVEs</div>\n      </div>\n      <div class=\"stat\">\n        <div class=\"stat-value\" style=\"color:#2196f3;\">${counts.news || 0}</div>\n        <div class=\"stat-label\">News & Alerts</div>\n      </div>\n    </div>\n\n    ${counts.exploited > 0 ? `\n    <div class=\"section\">\n      <h2>🚨 Actively Exploited Vulnerabilities (CISA KEV)</h2>\n      ${renderItems(items.exploited)}\n    </div>` : ''}\n\n    ${counts.aiAttacks > 0 ? `\n    <div class=\"section\">\n      <h2>🤖 AI-Powered or AI-Targeted Attacks</h2>\n      ${renderItems(items.aiAttacks)}\n    </div>` : ''}\n\n    ${counts.telecom > 0 ? `\n    <div class=\"section\">\n      <h2>📡 Telecommunications Sector Threats</h2>\n      ${renderItems(items.telecom)}\n    </div>` : ''}\n\n    ${counts.infrastructure > 0 ? `\n    <div class=\"section\">\n      <h2>🏭 Critical Infrastructure Incidents</h2>\n      ${renderItems(items.infrastructure)}\n    </div>` : ''}\n\n    <div class=\"section\">\n      <h2>🔴 Critical CVEs (CVSS ≥ 9.0)</h2>\n      ${renderItems(items.critical, 25)}\n    </div>\n\n    <div class=\"section\">\n      <h2>🟠 High Severity CVEs (CVSS 7.0–8.9)</h2>\n      ${renderItems(items.high, 20)}\n    </div>\n\n    <div class=\"section\">\n      <h2>📰 Latest Security News & Community Alerts</h2>\n      ${renderItems(items.news, 15, true)}\n    </div>\n\n    <div class=\"footer\">\n      <p><strong>Generated by n8n Security Intelligence Aggregator</strong></p>\n      <p>Sources: NVD • CISA KEV • BleepingComputer • Bad Sector Labs • Hacker News • Google News</p>\n      <p>Delivered to: tester.exe@proton.me • Next update in 12 hours</p>\n    </div>\n  </div>\n</body>\n</html>`;\n\nconsole.log('✓ Calm black-text HTML report generated');\n\nreturn [{\n  json: {\n    html,\n    filename: `security_update_${timestamp}.html`,\n    timestamp,\n    summary: counts,\n    totalItems\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        240
+      ],
+      "id": "ecde8371-b769-4e06-ad61-c25deb5deec5",
+      "name": "Generate HTML Report"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.html }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a senior cybersecurity analyst providing executive-level threat intelligence briefings.\n\nYour task: Analyze the security digest HTML report and generate an EXECUTIVE SUMMARY section that will be inserted at the top of the report.\n\nYour analysis should include:\n\n1. **THREAT LANDSCAPE OVERVIEW** (2-3 sentences)\n   - Current threat level assessment\n   - Most critical findings requiring immediate attention\n   - Overall security posture implications\n\n2. **TOP 3 CRITICAL PRIORITIES** (ranked by urgency)\n   - Each priority should have: Issue, Impact, and Recommended Action\n   - Be specific and actionable\n\n3. **THREAT TRENDS** (if patterns emerge)\n   - Any clustering of attack types\n   - Emerging threat vectors\n   - Industry-specific targeting\n\n4. **IMMEDIATE ACTIONS REQUIRED** (bullet points)\n   - Specific, actionable steps\n   - Prioritized by risk/urgency\n\nOutput ONLY valid JSON in this exact structure:\n{\n  \"executiveSummary\": \"<executive overview text>\",\n  \"threatLevel\": \"LOW|MODERATE|ELEVATED|HIGH|CRITICAL\",\n  \"topPriorities\": [\n    {\n      \"rank\": 1,\n      \"issue\": \"<brief issue description>\",\n      \"impact\": \"<business/security impact>\",\n      \"action\": \"<specific recommended action>\"\n    }\n  ],\n  \"threatTrends\": \"<trend analysis or 'No significant patterns detected'>\",\n  \"immediateActions\": [\"<action 1>\", \"<action 2>\", \"<action 3>\"]\n}\n\nBe concise, actionable, and executive-focused. Avoid technical jargon where possible."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        880,
+        624
+      ],
+      "id": "637e7027-8e84-456d-9996-a0b52287640c",
+      "name": "AI Agent",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "model": "llama3.2:3b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        768,
+        784
+      ],
+      "id": "8c340b0f-2250-4965-ac96-3c81d7d13985",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "GMbfXoJrXGrYU7cU",
+          "name": "Ollama account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare ENHANCED email with AI-generated executive summary - Updated for new HTML design\nconst aggregateData = $('Aggregate & Rank').first().json;\nconst htmlReport = $('Generate HTML Report').first().json.html;\nconst aiAnalysis = $('AI Agent').first().json;\n\nconst { date, totalItems, counts } = aggregateData;\n\nconsole.log('=== PREPARING UPDATED EMAIL WITH AI EXECUTIVE BRIEFING ===');\n\n// Safely parse AI analysis\nlet aiInsights;\ntry {\n  aiInsights = typeof aiAnalysis.output === 'string' ? JSON.parse(aiAnalysis.output) : aiAnalysis.output || {};\n} catch (e) {\n  console.error('Failed to parse AI analysis:', e);\n  aiInsights = {\n    executiveSummary: \"AI-powered analysis temporarily unavailable.\",\n    threatLevel: \"MODERATE\",\n    topPriorities: [],\n    threatTrends: \"No significant patterns detected at this time.\",\n    immediateActions: [\"Review the full report for latest vulnerabilities and news.\"]\n  };\n}\n\n// Calculate alert counts\nconst exploited = counts.exploited || 0;\nconst aiAttacks = counts.aiAttacks || 0;\nconst telecom = counts.telecom || 0;\nconst infrastructure = counts.infrastructure || 0;\nconst critical = counts.critical || 0;\n\n// Dynamic subject line & priority\nlet subject = `🔒 Security Intelligence Digest – ${date}`;\nlet priority = 'normal';\n\nif (aiInsights.threatLevel === 'CRITICAL' || exploited > 0) {\n  subject = `🚨 CRITICAL THREAT ALERT – Security Digest ${date}`;\n  priority = 'high';\n} else if (aiInsights.threatLevel === 'HIGH' || aiAttacks > 0 || telecom > 0 || infrastructure > 0) {\n  subject = `⚠️ ELEVATED: ${aiInsights.threatLevel} Threat Level – ${date}`;\n  priority = 'high';\n} else if (critical > 0) {\n  subject = `🔴 ${critical} Critical CVEs Detected – ${date}`;\n}\n\n// Plain text version with improved ASCII art\nconst textSummary = `\n╔═══════════════════════════════════════════════════════════╗\n║          SECURITY INTELLIGENCE DIGEST – ${date.padEnd(20)} ║\n╚═══════════════════════════════════════════════════════════╝\n\n🎯 EXECUTIVE THREAT BRIEFING\n───────────────────────────────────────────────────────────\nTHREAT LEVEL: ${aiInsights.threatLevel}\n\n${aiInsights.executiveSummary}\n\n🔴 TOP PRIORITIES\n${aiInsights.topPriorities.length > 0 ? aiInsights.topPriorities.map(p => `\n   Priority ${p.rank}: ${p.issue}\n      📊 Impact: ${p.impact}\n      ⚡ Action: ${p.action}`).join('\\n') : '   No high-priority items identified.'}\n\n📈 THREAT TRENDS\n${aiInsights.threatTrends}\n\n⚡ IMMEDIATE ACTIONS\n${aiInsights.immediateActions.length > 0 ? aiInsights.immediateActions.map((a, i) => `   ${i+1}. ${a}`).join('\\n') : '   No immediate actions required.'}\n\n╔═══════════════════════════════════════════════════════════╗\n║                     SUMMARY STATISTICS                    ║\n╚═══════════════════════════════════════════════════════════╝\nTotal Items Collected:     ${totalItems}\nActively Exploited (KEV):  ${exploited}\nAI-Related Attacks:        ${aiAttacks}\nTelecom Sector Threats:    ${telecom}\nCritical Infrastructure:  ${infrastructure}\nCritical CVEs (≥9.0):       ${critical}\nHigh CVEs (7.0–8.9):        ${counts.high || 0}\nNews & Community Alerts:   ${counts.news || 0}\n\n📋 Full detailed HTML report with severity indicators attached below.\n🔄 Next digest in 12 hours\n\nSources: NVD • CISA KEV • BleepingComputer • Bad Sector Labs • Hacker News • Google News\n🤖 AI Analysis: Powered by Ollama (Llama 3.2)\n🛡️ Generated by n8n Security Aggregator\n📧 Delivered to: tester.exe@proton.me\n`;\n\n// === Insert AI Executive Briefing into new HTML report ===\nconst threatLevelColors = {\n  'CRITICAL': '#d32f2f',\n  'HIGH': '#f44336',\n  'ELEVATED': '#ff9800',\n  'MODERATE': '#fbc02d',\n  'LOW': '#4caf50'\n};\nconst bgColor = threatLevelColors[aiInsights.threatLevel] || '#1976d2';\n\nconst executiveHtmlSection = `\n<div style=\"margin: 40px 0; padding: 30px; background: linear-gradient(135deg, ${bgColor} 0%, ${bgColor}ee 100%); color: white; border-radius: 12px; text-align: center; box-shadow: 0 6px 15px rgba(0,0,0,0.15);\">\n  <h2 style=\"margin: 0 0 20px 0; font-size: 28px;\">🎯 AI-Powered Executive Briefing</h2>\n  <div style=\"font-size: 36px; font-weight: bold; margin: 10px 0;\">${aiInsights.threatLevel}</div>\n  <p style=\"font-size: 18px; max-width: 800px; margin: 20px auto; opacity: 0.95; line-height: 1.6;\">\n    ${aiInsights.executiveSummary}\n  </p>\n</div>\n\n${aiInsights.topPriorities.length > 0 ? `\n<h2 style=\"color: #d32f2f; margin: 50px 0 25px 0; font-size: 26px;\">🔴 Top Priorities for Immediate Review</h2>\n<div style=\"display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 40px;\">\n  ${aiInsights.topPriorities.map(p => `\n  <div style=\"background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-left: 6px solid #f44336;\">\n    <div style=\"background: #f44336; color: white; padding: 12px 20px; font-weight: bold;\">\n      PRIORITY ${p.rank} — ${p.issue}\n    </div>\n    <div style=\"padding: 20px; color: #333;\">\n      <p style=\"margin: 0 0 15px 0;\"><strong>📊 Impact:</strong> ${p.impact}</p>\n      <p style=\"margin: 0;\"><strong>⚡ Recommended Action:</strong> ${p.action}</p>\n    </div>\n  </div>\n  `).join('')}\n</div>` : ''}\n\n${aiInsights.threatTrends && aiInsights.threatTrends !== 'No significant patterns detected' ? `\n<h2 style=\"color: #1976d2; margin: 50px 0 25px 0; font-size: 26px;\">📈 Emerging Threat Trends</h2>\n<div style=\"background: #e3f2fd; padding: 25px; border-radius: 10px; border-left: 5px solid #1976d2; font-size: 16px; line-height: 1.7;\">\n  ${aiInsights.threatTrends}\n</div>` : ''}\n\n${aiInsights.immediateActions.length > 0 ? `\n<h2 style=\"color: #ff9800; margin: 50px 0 25px 0; font-size: 26px;\">⚡ Immediate Actions Required</h2>\n<div style=\"background: #fff3cd; padding: 25px; border-radius: 10px; border-left: 5px solid #ff9800;\">\n  <ol style=\"margin: 0; padding-left: 30px; line-height: 1.8; font-size: 16px; color: #555;\">\n    ${aiInsights.immediateActions.map(a => `<li style=\"margin-bottom: 12px;\">${a}</li>`).join('')}\n  </ol>\n</div>` : ''}\n\n<hr style=\"border: none; border-top: 3px solid #eee; margin: 60px 0;\">\n`;\n\n// Insert the executive section right after the closing </div> of the header\nconst enhancedHtml = htmlReport.replace(\n  /(<\\/div>\\s*<!-- end of header -->|\\s*<\\/div>\\s*<\\/div>\\s*<!-- alert-banner)?\\s*(<div class=\"alert-banner\"|<\\/div>\\s*<\\/div>)?/s,\n  `$1${executiveHtmlSection}`\n);\n\n// Fallback: if regex fails, insert after the first occurrence of </div> after <div class=\"header\">\nif (!enhancedHtml.includes(executiveHtmlSection)) {\n  const fallbackHtml = htmlReport.replace(\n    /(<div class=\"header\">.*?<\\/div>)/s,\n    `$1${executiveHtmlSection}`\n  );\n  enhancedHtml = fallbackHtml;\n}\n\nconsole.log(`✓ Enhanced email prepared – Threat Level: ${aiInsights.threatLevel} | Items: ${totalItems}`);\n\nreturn [{\n  json: {\n    subject,\n    textBody: textSummary,\n    htmlBody: enhancedHtml,\n    to: 'tester.exe@proton.me',\n    from: 'Security Intelligence <security@n8n.local>',\n    timestamp: $('Set Parameters').first().json.timestamp,\n    priority,\n    aiAnalysis: aiInsights,\n    stats: {\n      total: totalItems,\n      exploited,\n      aiAttacks,\n      telecom,\n      infrastructure,\n      critical,\n      high: counts.high || 0,\n      news: counts.news || 0,\n      threatLevel: aiInsights.threatLevel\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        640
+      ],
+      "id": "27a33d3f-84c6-4cde-b6ee-ea95e0f6f776",
+      "name": "Prepare Email",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "fromEmail": "Security Digest <security@n8n.local>",
+        "toEmail": "robert.kwak@att.com, jonathan.gonzalez@att.com, adrian.lopez@att.com",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "both",
+        "text": "={{ $json.textBody }}",
+        "html": "={{ $json.htmlBody }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1664,
+        608
+      ],
+      "id": "be034b26-a11e-4b16-b3e9-d03a26c3129d",
+      "name": "Send Email Report",
+      "webhookId": "85597d4e-cf88-42b6-8a02-ff0fd5614902",
+      "credentials": {
+        "smtp": {
+          "id": "sHyvlPv83AdvYizU",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Email - CLEAN & PROFESSIONAL (MATCHES BLACK-TEXT HEADER)\nconst aggregateData = $('Aggregate & Rank').first().json;\nconst htmlReport = $('Generate HTML Report').first().json.html;\nconst { date, totalItems, counts } = aggregateData;\n\nconsole.log('=== PREPARING CLEAN EMAIL ===');\n\nconst exploited = counts.exploited || 0;\nconst criticalCVEs = counts.critical || 0;\n\n// Dynamic subject - calm and consistent with report title\nlet subject = `Security Update – ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;\n\nif (exploited > 0) {\n  subject = `Security Update – ${exploited} Actively Exploited Vulnerabilities – ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;\n} else if (criticalCVEs > 0) {\n  subject = `Security Update – ${criticalCVEs} Critical CVEs – ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;\n}\n\n// Plain text version - calm and factual\nconst textSummary = `\nSecurity Update\n${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}\n\n${totalItems} security items processed\n\nSummary\n─────────────────────────────\n• Actively Exploited (CISA KEV):     ${exploited}\n• Critical CVEs (CVSS ≥ 9.0):         ${criticalCVEs}\n• High Severity CVEs:                ${counts.high || 0}\n• AI-Related Threats:                ${counts.aiAttacks || 0}\n• Telecom & Infrastructure Alerts:   ${(counts.telecom || 0) + (counts.infrastructure || 0)}\n• News & Community Items:            ${counts.news || 0}\n\nFull detailed report included below.\n\nNext update in 12 hours\n\nSources: NVD • CISA KEV • BleepingComputer • Bad Sector Labs • Hacker News • Google News\nGenerated by n8n Security Aggregator\nDelivered to: tester.exe@proton.me\n`.trim();\n\n// No modifications to HTML report - preserve your clean black-text header exactly\nconst enhancedHtml = htmlReport;\n\nconsole.log(`✓ Clean email prepared | Subject: ${subject} | Items: ${totalItems}`);\n\nreturn [{\n  json: {\n    subject,\n    textBody: textSummary,\n    htmlBody: enhancedHtml,\n    to: 'tester.exe@proton.me',\n    from: 'Security Update <security@n8n.local>',\n    timestamp: $('Set Parameters').first().json.timestamp,\n    priority: exploited > 0 ? 'high' : 'normal'  // Only high priority for actual exploitation\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        160
+      ],
+      "id": "2cedbbcb-02b7-4623-8676-57536e28e84d",
+      "name": "Prepare Email1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Telecom-Focused Google News (Strict Telecom Priority)\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const json = item.json;\n  const title = (json.title || '').trim();\n  const titleLower = title.toLowerCase();\n  const desc = ((json.description || json.summary || '') + ' ' + title).toLowerCase();\n\n  let category = 'INFRASTRUCTURE';\n  let severity = 'MEDIUM';\n  let cvssScore = 7.0;\n  let specialAlert = false;\n\n  // Primary: Telecom keywords\n  const telecomKeywords = ['telecom', 'telecommunications', 'carrier', 'mobile network', '5g', '6g', 'cell tower', 'isp', 'fiber optic', 'undersea cable', 'roaming', 'mno', 'mvno', 'base station'];\n  const hasTelecom = telecomKeywords.some(k => titleLower.includes(k) || desc.includes(k));\n\n  // Secondary: Breach/attack keywords\n  const attackKeywords = ['breach', 'hack', 'outage', 'ddos', 'ransomware', 'compromised', 'exploit', 'zero-day', 'backdoor', 'phishing', 'supply chain'];\n  const hasAttack = attackKeywords.some(k => titleLower.includes(k) || desc.includes(k));\n\n  // AI as enhancer (not override)\n  const hasAI = /ai|artificial intelligence|machine learning|llm|generative ai|deepfake/i.test(titleLower + desc);\n\n  if (hasTelecom) {\n    category = 'TELECOM';\n    severity = hasAttack ? 'CRITICAL' : 'HIGH';\n    cvssScore = hasAttack ? 9.2 : 8.1;\n    specialAlert = true;\n  } else if (hasAttack) {\n    category = 'INFRASTRUCTURE';\n    severity = 'HIGH';\n    cvssScore = 8.0;\n    specialAlert = true;\n  }\n\n  if (hasAI && hasTelecom && hasAttack) {\n    category = 'TELECOM'; // Still telecom primary\n    severity = 'CRITICAL';\n    cvssScore = 9.7;\n  }\n\n  results.push({\n    source: 'Google News (Telecom Focus)',\n    category,\n    severity,\n    cvssScore,\n    title,\n    description: `Telecom sector incident${hasAttack ? ' involving active exploitation' : ''}${hasAI ? ' with AI involvement' : ''}.`,\n    url: json.link || json.url,\n    publishedDate: json.isoDate || json.pubDate || new Date().toISOString(),\n    timestamp: new Date(json.isoDate || json.pubDate || Date.now()).getTime(),\n    specialAlert\n  });\n}\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        880
+      ],
+      "id": "e262563c-f138-48a7-911c-314d64d0c4de",
+      "name": "Parse Telecom News"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI-Focused Google News (AI as Primary Threat Vector)\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const json = item.json;\n  const title = (json.title || '').trim();\n  const titleLower = title.toLowerCase();\n  const desc = ((json.description || json.summary || '') + ' ' + title).toLowerCase();\n\n  let category = 'NEWS';\n  let severity = 'MEDIUM';\n  let cvssScore = 6.5;\n  let specialAlert = false;\n\n  // Primary AI attack vectors\n  const aiAttackKeywords = [\n    'ai attack', 'prompt injection', 'model poisoning', 'adversarial ml', 'deepfake', 'ai phishing',\n    'llm exploit', 'generative ai hack', 'ai supply chain', 'trojaned model', 'backdoor ai',\n    'ai red team', 'jailbreak', 'data poisoning', 'inference attack', 'membership inference'\n  ];\n  const hasAIAttack = aiAttackKeywords.some(k => titleLower.includes(k) || desc.includes(k));\n\n  // General AI in security context\n  const aiContextKeywords = ['ai', 'artificial intelligence', 'machine learning', 'llm', 'gpt', 'gemini', 'claude', 'deep learning'];\n  const hasAIContext = aiContextKeywords.some(k => titleLower.includes(k) || desc.includes(k));\n\n  // Infrastructure targets\n  const infraTargets = ['cloud', 'gpu', 'tpu', 'data center', 'nvidia', 'aws', 'azure', 'google cloud', 'training cluster'];\n  const hasInfra = infraTargets.some(k => titleLower.includes(k) || desc.includes(k));\n\n  // Exploitation indicators\n  const exploitIndicators = ['breach', 'hack', 'exploit', 'ransomware', '0day', 'cve', 'compromised', 'leaked'];\n  const hasExploit = exploitIndicators.some(k => titleLower.includes(k) || desc.includes(k));\n\n  if (hasAIAttack) {\n    category = 'AI_ATTACK';\n    severity = 'CRITICAL';\n    cvssScore = 9.8;\n    specialAlert = true;\n  } else if (hasAIContext && hasExploit) {\n    category = 'AI_ATTACK';\n    severity = 'HIGH';\n    cvssScore = 8.7;\n    specialAlert = true;\n  } else if (hasAIContext && hasInfra) {\n    category = 'INFRASTRUCTURE';\n    severity = 'HIGH';\n    cvssScore = 8.0;\n    specialAlert = true;\n  } else if (hasAIContext) {\n    category = 'NEWS';\n    severity = 'INFO';\n    cvssScore = 0;\n  }\n\n  results.push({\n    source: 'Google News (AI Security Focus)',\n    category,\n    severity,\n    cvssScore,\n    title,\n    description: hasAIAttack \n      ? 'AI-native attack vector detected (e.g., prompt injection, model poisoning).'\n      : hasAIContext && hasExploit \n        ? 'AI system targeted in active exploitation.'\n        : hasAIContext && hasInfra \n          ? 'AI training/inference infrastructure under threat.'\n          : 'Emerging AI security development.',\n    url: json.link || json.url,\n    publishedDate: json.isoDate || json.pubDate || new Date().toISOString(),\n    timestamp: new Date(json.isoDate || json.pubDate || Date.now()).getTime(),\n    specialAlert\n  });\n}\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        1008
+      ],
+      "id": "eefb8c09-7cdb-4cf2-b503-381010f9a344",
+      "name": "Parse AI News"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 12 Hours": {
+      "main": [
+        [
+          {
+            "node": "Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat: Get Security News": {
+      "main": [
+        [
+          {
+            "node": "Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Run": {
+      "main": [
+        [
+          {
+            "node": "Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Parameters": {
+      "main": [
+        [
+          {
+            "node": "NVD Recent CVEs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CISA Exploited CVEs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Hacker News Items",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Bad Sector Labs RSS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google News: Telecom/Infrastructure",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google News: AI Attacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVD Recent CVEs": {
+      "main": [
+        [
+          {
+            "node": "Parse NVD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CISA Exploited CVEs": {
+      "main": [
+        [
+          {
+            "node": "Parse CISA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bad Sector Labs RSS": {
+      "main": [
+        [
+          {
+            "node": "Parse RSS Feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hacker News Items": {
+      "main": [
+        [
+          {
+            "node": "Parse Hacker News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google News: Telecom/Infrastructure": {
+      "main": [
+        [
+          {
+            "node": "Parse Telecom News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google News: AI Attacks": {
+      "main": [
+        [
+          {
+            "node": "Parse AI News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse NVD": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CISA": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Parse RSS Feeds": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Parse Hacker News": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge All Sources": {
+      "main": [
+        [
+          {
+            "node": "Aggregate & Rank",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate & Rank": {
+      "main": [
+        [
+          {
+            "node": "Generate HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email": {
+      "main": [
+        []
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email1": {
+      "main": [
+        [
+          {
+            "node": "Send Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Telecom News": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Parse AI News": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fb634e1d-7f99-40ce-80bf-7063df409897",
+  "meta": {
+    "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
+  },
+  "id": "LMoUXV3SZtUjinud",
+  "tags": []
+}
