@@ -236,8 +236,8 @@ After rebuild, you will have **30+ security tools**:
 ### DNS Tools (5)
 - dnsx, puredns, massdns, dig, dnsrecon
 
-### Port Scanning (2)
-- nmap, naabu
+### Port Scanning (3)
+- nmap, naabu, fping
 
 ### Web Crawling (4)
 - katana, gospider, waybackurls, gau

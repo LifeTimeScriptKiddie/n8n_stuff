@@ -196,7 +196,7 @@ Tools are installed on-demand when the AI requests them. No need to pre-install 
 |----------|-------|---------|
 | **Subdomain Enumeration** | `subfinder`, `amass` | Discover subdomains from multiple sources |
 | **DNS Intelligence** | `dnsx`, `puredns`, `massdns`, `dig`, `dnsrecon` | DNS validation, bruteforce, resolution |
-| **Port Scanning** | `nmap`, `naabu` | Service discovery, version detection |
+| **Port Scanning** | `nmap`, `naabu`, `fping` | Service discovery, version detection, host availability |
 | **HTTP Probing** | `httpx` | Fast HTTP probe with tech detection |
 
 ### **Web Application Assessment**

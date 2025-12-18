@@ -5,7 +5,9 @@ USER root
 # Set environment variables
 ENV GOPATH=/root/go \
     PATH=$PATH:/root/go/bin \
-    GOPROXY=https://proxy.golang.org,direct
+    GOPROXY=https://proxy.golang.org,direct \
+    GOSUMDB=sum.golang.org \
+    GOTIMEOUT=300
 
 # Install minimal system dependencies
 RUN apk update && apk add --no-cache \
@@ -19,6 +21,7 @@ RUN apk update && apk add --no-cache \
     nmap \
     nmap-scripts \
     bind-tools \
+    fping \
     # SSH and tunnel tools (for pivot capability)
     openssh-client \
     sshpass \
@@ -183,28 +186,28 @@ RUN echo '#!/bin/sh' > /usr/local/bin/install-tool && \
     echo 'cp /root/go/bin/* /usr/local/bin/ 2>/dev/null || true' >> /usr/local/bin/install-tool && \
     chmod +x /usr/local/bin/install-tool
 
-# Install only essential Go tools for basic recon
-RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
-    go install github.com/projectdiscovery/httpx/cmd/httpx@latest && \
-    go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest && \
-    go install github.com/owasp-amass/amass/v4/...@master
+# Install only essential Go tools for basic recon (split for reliability)
+RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+RUN go install -v github.com/owasp-amass/amass/v4/...@master
 
 # ============================================
 # TIER 1: Web Discovery & Crawling Tools
 # ============================================
-RUN echo "Installing Tier 1: Web Discovery Tools..." && \
-    go install github.com/projectdiscovery/katana/cmd/katana@latest && \
-    go install github.com/tomnomnom/waybackurls@latest && \
-    go install github.com/lc/gau/v2/cmd/gau@latest && \
-    go install github.com/jaeles-project/gospider@latest
+RUN echo "Installing Tier 1: Web Discovery Tools..."
+RUN go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+RUN go install -v github.com/tomnomnom/waybackurls@latest
+RUN go install -v github.com/lc/gau/v2/cmd/gau@latest
+RUN go install -v github.com/jaeles-project/gospider@latest
 
 # ============================================
 # TIER 1: Enhanced DNS Tools
 # ============================================
-RUN echo "Installing Tier 1: DNS Tools..." && \
-    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest && \
-    go install github.com/d3mondev/puredns/v2@latest && \
-    git clone --depth 1 https://github.com/blechschmidt/massdns.git /tmp/massdns && \
+RUN echo "Installing Tier 1: DNS Tools..."
+RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+RUN go install -v github.com/d3mondev/puredns/v2@latest
+RUN git clone --depth 1 https://github.com/blechschmidt/massdns.git /tmp/massdns && \
     cd /tmp/massdns && make && cp bin/massdns /usr/local/bin/ && \
     chmod +x /usr/local/bin/massdns && \
     cd / && rm -rf /tmp/massdns
@@ -212,14 +215,7 @@ RUN echo "Installing Tier 1: DNS Tools..." && \
 # Create default DNS resolvers file for puredns/massdns
 RUN echo "Installing DNS resolvers..." && \
     mkdir -p /usr/share/dns-resolvers && \
-    echo "8.8.8.8
-8.8.4.4
-1.1.1.1
-1.0.0.1
-9.9.9.9
-149.112.112.112
-208.67.222.222
-208.67.220.220" > /usr/share/dns-resolvers/resolvers.txt && \
+    printf "8.8.8.8\n8.8.4.4\n1.1.1.1\n1.0.0.1\n9.9.9.9\n149.112.112.112\n208.67.222.222\n208.67.220.220\n" > /usr/share/dns-resolvers/resolvers.txt && \
     ln -s /usr/share/dns-resolvers/resolvers.txt /tmp/resolvers.txt
 
 # ============================================
@@ -235,9 +231,9 @@ RUN echo "Installing Tier 1: Technology Detection..." && \
 # ============================================
 # TIER 1: Content Discovery
 # ============================================
-RUN echo "Installing Tier 1: Content Discovery..." && \
-    go install github.com/ffuf/ffuf/v2@latest && \
-    pip3 install --no-cache-dir --break-system-packages dirsearch
+RUN echo "Installing Tier 1: Content Discovery..."
+RUN go install -v github.com/ffuf/ffuf/v2@latest
+RUN pip3 install --no-cache-dir --break-system-packages dirsearch
 
 # ============================================
 # TIER 2: API Discovery
@@ -248,9 +244,9 @@ RUN echo "Installing Tier 2: API Discovery..." && \
 # ============================================
 # TIER 2: SSL/TLS Analysis
 # ============================================
-RUN echo "Installing Tier 2: SSL/TLS Analysis..." && \
-    go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest && \
-    git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl && \
+RUN echo "Installing Tier 2: SSL/TLS Analysis..."
+RUN go install -v github.com/projectdiscovery/tlsx/cmd/tlsx@latest
+RUN git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl && \
     ln -s /opt/testssl/testssl.sh /usr/local/bin/testssl && \
     chmod +x /opt/testssl/testssl.sh
 
@@ -273,15 +269,15 @@ RUN echo "Installing Tier 3: Cloud Discovery..." && \
 # ============================================
 # ADDITIONAL TOOLS: Port Scanning
 # ============================================
-RUN echo "Installing Additional Port Scanning Tools..." && \
-    go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest && \
-    apk add --no-cache libpcap-dev
+RUN echo "Installing Additional Port Scanning Tools..."
+RUN apk add --no-cache libpcap-dev
+RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
 
 # ============================================
 # ADDITIONAL TOOLS: Directory Discovery
 # ============================================
-RUN echo "Installing Additional Directory Discovery Tools..." && \
-    apk add --no-cache gobuster
+RUN echo "Installing Additional Directory Discovery Tools..."
+RUN go install -v github.com/OJ/gobuster/v3@v3.6.0
 
 # ============================================
 # ADDITIONAL TOOLS: DNS Enumeration

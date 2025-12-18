@@ -720,6 +720,7 @@ verify_tools() {
     echo -e "${CYAN}Port Scanning:${NC}"
     docker compose exec -T n8n-recon bash -c "nmap --version 2>&1 | head -1" && print_success "nmap"
     docker compose exec -T n8n-recon bash -c "naabu -version 2>&1 | head -1" && print_success "naabu"
+    docker compose exec -T n8n-recon bash -c "fping -v 2>&1 | head -1" && print_success "fping"
 
     echo ""
     echo -e "${CYAN}API Discovery (Tier 2):${NC}"
@@ -784,7 +785,7 @@ print_final_info() {
     echo ""
     echo -e "  ${MAGENTA}Subdomain Enum:${NC}    subfinder, amass"
     echo -e "  ${MAGENTA}DNS Tools:${NC}         dnsx, puredns, massdns, dig, dnsrecon"
-    echo -e "  ${MAGENTA}Port Scanning:${NC}     nmap, naabu"
+    echo -e "  ${MAGENTA}Port Scanning:${NC}     nmap, naabu, fping"
     echo -e "  ${MAGENTA}Web Crawling:${NC}      katana, gospider, waybackurls, gau"
     echo -e "  ${MAGENTA}Content Discovery:${NC} ffuf, gobuster, dirsearch"
     echo -e "  ${MAGENTA}Tech Detection:${NC}    wappalyzer, WhatWeb, retire.js"
