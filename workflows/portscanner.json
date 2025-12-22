@@ -1,0 +1,578 @@
+{
+  "name": "portscanner",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "5cea6803-783e-4c02-9b7e-053a97b28d23",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        -1936,
+        288
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $json.target }}"
+            },
+            {
+              "id": "2",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $now.format('yyyyMMdd_HHmmss') }}"
+            },
+            {
+              "id": "0a15fc2e-83fa-4f10-bfc4-5031a2b3381c",
+              "name": "report_password",
+              "type": "string",
+              "value": "test"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c5153924-7649-4c7f-b16c-92892b32231c",
+      "name": "1. Set Parameters",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -1296,
+        160
+      ],
+      "typeVersion": 3.3,
+      "notes": "Configure scan parameters and timestamp"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Nmap XML output to extract services\nconst raw = $input.first().json;\nconst xmlContent = raw.stdout || raw;\n\nlet services = [];\n\nconsole.log('=== PARSING NMAP XML ===');\n\n// Simple XML parsing using regex\nconst hostRegex = /<host[^>]*>[\\s\\S]*?<\\/host>/g;\nconst hosts = xmlContent.match(hostRegex) || [];\n\nconsole.log(`Found ${hosts.length} hosts`);\n\nfor (const hostXml of hosts) {\n  const addrMatch = hostXml.match(/<address\\s+addr=\"([^\"]+)\"\\s+addrtype=\"ipv4\"/i);\n  const ip = addrMatch ? addrMatch[1] : 'unknown';\n\n  const portRegex = /<port\\s+protocol=\"([^\"]+)\"\\s+portid=\"([^\"]+)\"[^>]*>([\\s\\S]*?)<\\/port>/g;\n  let portMatch;\n\n  while ((portMatch = portRegex.exec(hostXml)) !== null) {\n    const protocol = portMatch[1];\n    const portid = portMatch[2];\n    const portContent = portMatch[3];\n\n    const stateMatch = portContent.match(/<state\\s+state=\"([^\"]+)\"/i);\n    const state = stateMatch ? stateMatch[1] : 'unknown';\n\n    if (state !== 'open') continue;\n\n    const serviceMatch = portContent.match(/<service\\s+([^>]+)\\/?>/i);\n    let serviceName = 'unknown';\n    let product = '';\n    let version = '';\n    let cpe = '';\n\n    if (serviceMatch) {\n      const serviceAttrs = serviceMatch[1];\n      const nameMatch = serviceAttrs.match(/name=\"([^\"]+)\"/i);\n      serviceName = nameMatch ? nameMatch[1] : 'unknown';\n      const productMatch = serviceAttrs.match(/product=\"([^\"]+)\"/i);\n      product = productMatch ? productMatch[1] : '';\n      const versionMatch = serviceAttrs.match(/version=\"([^\"]+)\"/i);\n      version = versionMatch ? versionMatch[1] : '';\n    }\n\n    const cpeMatch = portContent.match(/<cpe>([^<]+)<\\/cpe>/i);\n    if (cpeMatch) {\n      cpe = cpeMatch[1].replace(/^cpe:\\//, 'cpe:2.3:');\n      if (!cpe.endsWith(':')) cpe += ':';\n    }\n\n    services.push({\n      ip,\n      port: portid,\n      protocol,\n      service: serviceName,\n      product,\n      version,\n      cpe,\n      serviceKey: `${ip}:${portid}`\n    });\n\n    console.log(`  ${ip}:${portid}/${protocol} - ${serviceName} ${product} ${version}`);\n  }\n}\n\nconsole.log(`✓ Parsed ${services.length} services`);\n\nreturn [{json: { services: services }}];"
+      },
+      "id": "ff98d8d6-67b6-408f-911f-9cd615a5dcda",
+      "name": "Parse Nmap Results",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -480,
+        -80
+      ],
+      "typeVersion": 2,
+      "notes": "Extract all services with version details"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SIMPLIFIED HTML REPORT GENERATOR - Works with or without CVE Enrichment\n// This version safely handles missing CVE data\n\nconst report = $input.first().json;\nconst meta = report.metadata;\nconst nmapOutput = report.nmapRawOutput || 'No nmap output available';\n\nconsole.log('=== GENERATING HTML REPORT ===');\n\n// Try to get enriched services from CVE Enrichment node (if it exists)\nlet enrichedServices = [];\nlet hasCveData = false;\n\ntry {\n  const cveEnrichmentData = $('CVE Enrichment');\n  if (cveEnrichmentData && cveEnrichmentData.first()?.json?.services) {\n    enrichedServices = cveEnrichmentData.first().json.services;\n    hasCveData = true;\n    console.log(`✓ Found ${enrichedServices.length} services with CVE data`);\n  }\n} catch (error) {\n  console.log('⚠ CVE Enrichment node not found - using basic service data');\n}\n\n// If no CVE data, try to get services from previous node\nif (enrichedServices.length === 0) {\n  const prevNode = $input.first();\n  if (prevNode?.json?.services) {\n    enrichedServices = prevNode.json.services;\n    console.log(`✓ Using ${enrichedServices.length} services from input`);\n  }\n}\n\n// Parse basic nmap output info\nfunction parseBasicInfo(rawOutput) {\n  const info = {\n    target: 'Unknown',\n    scanTime: '0',\n    filteredPorts: 0\n  };\n  \n  const targetMatch = rawOutput.match(/Target:\\s*(.+)/);\n  if (targetMatch) info.target = targetMatch[1].trim();\n  \n  const timeMatch = rawOutput.match(/scanned in\\s+([\\d.]+)\\s+seconds/);\n  if (timeMatch) info.scanTime = parseFloat(timeMatch[1]).toFixed(2);\n  \n  return info;\n}\n\nconst basicInfo = parseBasicInfo(nmapOutput);\n\n// Sort services by port number\nenrichedServices.sort((a, b) => parseInt(a.port) - parseInt(b.port));\n\n// Generate executive summary\nconst executiveSummary = enrichedServices.length === 0 \n  ? 'No open ports were detected during this scan.'\n  : `Scan identified ${enrichedServices.length} open port${enrichedServices.length > 1 ? 's' : ''} on the target system.`;\n\n// Helper function to format CVE data (handles both with and without CVE enrichment)\nfunction formatCveColumn(service) {\n  // If we have CVE HTML from enrichment, use it\n  if (service.cveHtml) {\n    return service.cveHtml;\n  }\n  \n  // If we have CVE text from enrichment, use it\n  if (service.cves) {\n    return `<span style=\"color: #cbd5e1; font-size: 13px;\">${service.cves}</span>`;\n  }\n  \n  // Otherwise show placeholder\n  return '<span style=\"color: #94a3b8; font-style: italic; font-size: 13px;\">CVE lookup not enabled</span>';\n}\n\n// Count services with CVE data\nconst servicesWithCves = enrichedServices.filter(s => s.cveDetails && s.cveDetails.length > 0).length;\n\n// HTML Template\nconst html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Port Scan Report - ${meta.scanTarget}</title>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    \n    @page {\n      size: A4;\n      margin: 20mm;\n      @bottom-center {\n        content: \"Page \" counter(page) \" of \" counter(pages);\n        font-size: 10pt;\n        color: #64748b;\n      }\n    }\n    \n    body { \n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);\n      color: #e2e8f0;\n      line-height: 1.6;\n      padding: 30px;\n    }\n    \n    .page-container {\n      max-width: 1400px;\n      margin: 0 auto;\n      background: #1e293b;\n      border-radius: 16px;\n      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);\n      overflow: hidden;\n    }\n    \n    .report-header {\n      background: linear-gradient(135deg, #1e293b 0%, #334155 100%);\n      padding: 50px 60px;\n      border-bottom: 3px solid #60a5fa;\n      position: relative;\n      overflow: hidden;\n    }\n    \n    .report-header::before {\n      content: '';\n      position: absolute;\n      top: 0;\n      left: 0;\n      right: 0;\n      height: 100%;\n      background: radial-gradient(circle at top right, rgba(96, 165, 250, 0.1), transparent);\n    }\n    \n    .report-header h1 {\n      font-size: 42px;\n      color: #60a5fa;\n      margin-bottom: 15px;\n      font-weight: 700;\n      text-shadow: 0 0 40px rgba(96, 165, 250, 0.4);\n      position: relative;\n    }\n    \n    .report-header .subtitle {\n      font-size: 18px;\n      color: #94a3b8;\n      margin-bottom: 30px;\n      position: relative;\n    }\n    \n    .meta-info {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));\n      gap: 20px;\n      margin-top: 30px;\n      position: relative;\n    }\n    \n    .meta-item {\n      background: rgba(15, 23, 42, 0.6);\n      padding: 15px 20px;\n      border-radius: 10px;\n      border-left: 3px solid #60a5fa;\n    }\n    \n    .meta-item label {\n      display: block;\n      color: #94a3b8;\n      font-size: 12px;\n      text-transform: uppercase;\n      letter-spacing: 1px;\n      margin-bottom: 5px;\n      font-weight: 600;\n    }\n    \n    .meta-item value {\n      display: block;\n      color: #f1f5f9;\n      font-size: 16px;\n      font-weight: 500;\n    }\n    \n    .executive-summary {\n      background: linear-gradient(135deg, #0c4a6e 0%, #075985 100%);\n      margin: 30px;\n      padding: 30px;\n      border-radius: 12px;\n      border-left: 5px solid #0ea5e9;\n    }\n    \n    .executive-summary h2 {\n      color: #7dd3fc;\n      font-size: 24px;\n      margin-bottom: 15px;\n    }\n    \n    .executive-summary p {\n      color: #e0f2fe;\n      font-size: 16px;\n      line-height: 1.8;\n    }\n    \n    .stats-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));\n      gap: 20px;\n      margin: 30px;\n    }\n    \n    .stat-card {\n      background: linear-gradient(135deg, #1e293b, #0f172a);\n      padding: 25px;\n      border-radius: 12px;\n      text-align: center;\n      border: 1px solid #334155;\n      transition: transform 0.2s;\n    }\n    \n    .stat-card:hover {\n      transform: translateY(-2px);\n      box-shadow: 0 10px 30px rgba(96, 165, 250, 0.2);\n    }\n    \n    .stat-number {\n      font-size: 48px;\n      font-weight: 700;\n      color: #60a5fa;\n      display: block;\n      margin-bottom: 10px;\n      text-shadow: 0 0 20px rgba(96, 165, 250, 0.3);\n    }\n    \n    .stat-label {\n      font-size: 14px;\n      color: #94a3b8;\n      text-transform: uppercase;\n      letter-spacing: 1px;\n      font-weight: 600;\n    }\n    \n    .findings-section {\n      margin: 30px;\n    }\n    \n    .findings-section h2 {\n      color: #f1f5f9;\n      font-size: 28px;\n      margin-bottom: 25px;\n      padding: 0 0 15px 0;\n      border-bottom: 2px solid #334155;\n    }\n    \n    .port-table {\n      width: 100%;\n      background: #0f172a;\n      border-radius: 12px;\n      overflow: hidden;\n      margin-bottom: 20px;\n      border: 1px solid #334155;\n    }\n    \n    .port-table table {\n      width: 100%;\n      border-collapse: collapse;\n    }\n    \n    .port-table thead {\n      background: #1e293b;\n      border-bottom: 2px solid #334155;\n    }\n    \n    .port-table th {\n      padding: 15px 20px;\n      text-align: left;\n      color: #94a3b8;\n      font-size: 13px;\n      text-transform: uppercase;\n      letter-spacing: 1px;\n      font-weight: 600;\n    }\n    \n    .port-table td {\n      padding: 15px 20px;\n      color: #cbd5e1;\n      border-bottom: 1px solid #1e293b;\n      vertical-align: top;\n    }\n    \n    .port-table tbody tr:last-child td {\n      border-bottom: none;\n    }\n    \n    .port-table tbody tr:hover {\n      background: rgba(96, 165, 250, 0.05);\n    }\n    \n    .port-number {\n      font-family: 'Courier New', monospace;\n      font-weight: 700;\n      font-size: 16px;\n      color: #60a5fa;\n    }\n    \n    .service-name {\n      color: #f1f5f9;\n      font-weight: 600;\n      margin-bottom: 5px;\n    }\n    \n    .service-version {\n      color: #94a3b8;\n      font-size: 13px;\n    }\n    \n    .cve-column a {\n      font-size: 13px;\n      text-decoration: none;\n      transition: opacity 0.2s;\n    }\n    \n    .cve-column a:hover {\n      opacity: 0.8;\n      text-decoration: underline;\n    }\n    \n    .raw-output-section {\n      margin: 30px;\n      page-break-before: always;\n    }\n    \n    .raw-output-section h2 {\n      color: #f1f5f9;\n      font-size: 28px;\n      margin-bottom: 25px;\n      padding-bottom: 15px;\n      border-bottom: 2px solid #334155;\n    }\n    \n    .raw-output-container {\n      background: #0f172a;\n      border: 1px solid #334155;\n      border-radius: 12px;\n      overflow: hidden;\n    }\n    \n    .raw-output-header {\n      background: #1e293b;\n      padding: 15px 25px;\n      border-bottom: 1px solid #334155;\n    }\n    \n    .raw-output-header h3 {\n      color: #f1f5f9;\n      font-size: 16px;\n      font-weight: 600;\n    }\n    \n    .raw-output {\n      font-family: 'Courier New', Consolas, Monaco, monospace;\n      font-size: 12px;\n      line-height: 1.5;\n      padding: 25px;\n      white-space: pre-wrap;\n      word-wrap: break-word;\n      color: #cbd5e1;\n      max-height: 600px;\n      overflow-y: auto;\n    }\n    \n    .report-footer {\n      background: #0f172a;\n      padding: 30px 60px;\n      text-align: center;\n      color: #64748b;\n      border-top: 1px solid #334155;\n    }\n    \n    .report-footer p {\n      font-size: 13px;\n      margin-bottom: 5px;\n    }\n    \n    .disclaimer {\n      background: #1e293b;\n      margin: 30px;\n      padding: 20px;\n      border-radius: 10px;\n      border-left: 4px solid #f59e0b;\n      font-size: 13px;\n      color: #cbd5e1;\n    }\n    \n    .disclaimer strong {\n      color: #fcd34d;\n    }\n    \n    .disclaimer ul {\n      margin: 10px 0 0 20px;\n      line-height: 1.8;\n    }\n    \n    @media print {\n      body { background: white; color: black; }\n      .page-container { box-shadow: none; }\n      .report-header {\n        background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);\n        border-bottom: 3px solid #3b82f6;\n      }\n      .report-header h1 { color: #1e40af; text-shadow: none; }\n      .stat-card, .port-table { border: 1px solid #d1d5db; }\n      * {\n        color-adjust: exact;\n        -webkit-print-color-adjust: exact;\n        print-color-adjust: exact;\n      }\n    }\n  </style>\n</head>\n<body>\n  <div class=\"page-container\">\n    <div class=\"report-header\">\n      <h1>🔐 Port Scan Report</h1>\n      <div class=\"subtitle\">Network Security Assessment</div>\n      \n      <div class=\"meta-info\">\n        <div class=\"meta-item\">\n          <label>Target</label>\n          <value>${meta.scanTarget}</value>\n        </div>\n        <div class=\"meta-item\">\n          <label>Scan Date</label>\n          <value>${meta.scanDate} ${meta.scanTime}</value>\n        </div>\n        <div class=\"meta-item\">\n          <label>Scan Duration</label>\n          <value>${basicInfo.scanTime}s</value>\n        </div>\n        <div class=\"meta-item\">\n          <label>Report Version</label>\n          <value>${meta.version}</value>\n        </div>\n      </div>\n    </div>\n    \n    <div class=\"executive-summary\">\n      <h2>📊 Executive Summary</h2>\n      <p>${executiveSummary}</p>\n    </div>\n    \n    <div class=\"stats-grid\">\n      <div class=\"stat-card\">\n        <span class=\"stat-number\">${enrichedServices.length}</span>\n        <span class=\"stat-label\">Open Ports</span>\n      </div>\n      <div class=\"stat-card\">\n        <span class=\"stat-number\">${basicInfo.filteredPorts}</span>\n        <span class=\"stat-label\">Filtered Ports</span>\n      </div>\n      <div class=\"stat-card\">\n        <span class=\"stat-number\">${basicInfo.scanTime}s</span>\n        <span class=\"stat-label\">Scan Duration</span>\n      </div>\n      <div class=\"stat-card\">\n        <span class=\"stat-number\">${hasCveData ? servicesWithCves : 'N/A'}</span>\n        <span class=\"stat-label\">Ports with CVEs</span>\n      </div>\n    </div>\n    \n    <div class=\"findings-section\">\n      <h2>🔍 Open Ports & Services</h2>\n      \n      ${enrichedServices.length === 0 ? '<p style=\"color: #94a3b8; padding: 30px; text-align: center;\">No open ports detected.</p>' : `\n        <div class=\"port-table\">\n          <table>\n            <thead>\n              <tr>\n                <th style=\"width: 12%;\">Port</th>\n                <th style=\"width: 28%;\">Service / Version</th>\n                <th style=\"width: 60%;\">CVEs ${hasCveData ? '(Click to view in NVD)' : ''}</th>\n              </tr>\n            </thead>\n            <tbody>\n              ${enrichedServices.map(service => `\n                <tr>\n                  <td><span class=\"port-number\">${service.port}/${service.protocol}</span></td>\n                  <td>\n                    <div class=\"service-name\">${service.service}</div>\n                    <div class=\"service-version\">${service.version || 'Version not detected'}</div>\n                  </td>\n                  <td class=\"cve-column\">${formatCveColumn(service)}</td>\n                </tr>\n              `).join('')}\n            </tbody>\n          </table>\n        </div>\n      `}\n    </div>\n    \n    ${hasCveData ? `\n    <div class=\"disclaimer\">\n      <strong>⚠️ CVE Information:</strong> CVE data is fetched from NIST National Vulnerability Database (NVD).\n      Click on any CVE ID to view full details including complete vulnerability description, CVSS breakdown, affected configurations, and available patches.\n    </div>\n    ` : `\n    <div class=\"disclaimer\">\n      <strong>💡 Enable CVE Lookup:</strong> To get real-time vulnerability data from NIST NVD, add the CVE Enrichment node between \"Parse Nmap Results\" and \"nmap results\".\n      This will provide actual CVE IDs, CVSS scores, and clickable links to full vulnerability details.\n    </div>\n    `}\n    \n    <div class=\"raw-output-section\">\n      <h2>📄 Raw Scan Output</h2>\n      <div class=\"raw-output-container\">\n        <div class=\"raw-output-header\">\n          <h3>Complete Nmap Output</h3>\n        </div>\n        <pre class=\"raw-output\">${nmapOutput.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>\n      </div>\n    </div>\n    \n    <div class=\"report-footer\">\n      <p><strong>Generated by n8n Port Scanner Workflow</strong></p>\n      <p>Report ID: ${meta.timestamp} | ${hasCveData ? 'CVE Data: NIST NVD |' : ''} Tools: Nmap</p>\n      <p style=\"margin-top: 10px; font-size: 11px;\">\n        This report contains sensitive security information. Handle with care.\n      </p>\n    </div>\n  </div>\n</body>\n</html>`;\n\nconsole.log('✓ HTML report generated');\nconsole.log(`  Services included: ${enrichedServices.length}`);\nconsole.log(`  CVE data available: ${hasCveData ? 'Yes' : 'No'}`);\nif (hasCveData) {\n  console.log(`  Services with CVEs: ${servicesWithCves}`);\n}\n\nconst cleanTarget = meta.scanTarget.replace(/[^a-zA-Z0-9.-]/g, '_');\nconst fileName = `nmap_report_${cleanTarget}_${meta.timestamp}.html`;\n\nconst buffer = Buffer.from(html, 'utf-8');\nconst base64Data = buffer.toString('base64');\n\nreturn [{\n  json: { \n    html: html,\n    fileName: fileName,\n    fileSize: buffer.length,\n    target: meta.scanTarget,\n    timestamp: meta.timestamp\n  },\n  binary: {\n    data: {\n      data: base64Data,\n      mimeType: 'text/html',\n      fileName: fileName,\n      fileExtension: 'html'\n    }\n  }\n}];"
+      },
+      "id": "bf3c9e82-9945-49d1-a8a2-cb8457b7a169",
+      "name": "Generate Comprehensive HTML Report",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 2,
+      "notes": "Create detailed HTML report with ALL findings including new tools"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "preset-1",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $json.chatInput.trim() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7fa1615d-b813-4d2a-8501-04752a7edbd6",
+      "name": "Pre-Set-Target",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -1600,
+        160
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "formTitle": "Advanced Security Scanner",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Target (Domain or IP/Network)",
+              "placeholder": "example.com or 192.168.1.0/24",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "path": "scan"
+        }
+      },
+      "id": "7428fa5e-eb60-46f3-b5a1-a68db7873172",
+      "name": "Form Trigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "position": [
+        -1600,
+        384
+      ],
+      "webhookId": "e8ecf0c1-1cee-4280-bebc-5ea8b9e85a01",
+      "typeVersion": 2.3
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseMode": "responseNodes"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1920,
+        16
+      ],
+      "id": "f38a07ee-3aef-4253-95cf-a0e4677c691f",
+      "name": "When chat message received",
+      "webhookId": "5ac850b4-1c6a-439e-8344-c9ad7f824b96"
+    },
+    {
+      "parameters": {
+        "command": "=#!/bin/bash\n# Convert HTML to PDF - CLEAN JSON output\n\ntimestamp=\"{{ $('1. Set Parameters').first().json.timestamp }}\"\ntarget=\"{{ $('1. Set Parameters').first().json.target }}\"\n\nhtml_file=\"/tmp/report_${timestamp}.html\"\npdf_file=\"/tmp/nmap_report_${timestamp}.pdf\"\nbinary_file=\"/tmp/nmap_report_${timestamp}.pdf.b64\"\n\necho \"=== HTML TO PDF CONVERSION ===\" >&2\n\n# Save HTML content\ncat > \"$html_file\" << 'HTMLEOF'\n{{ $input.first().json.html }}\nHTMLEOF\n\necho \"✓ HTML saved: $html_file ($(wc -c < $html_file) bytes)\" >&2\n\n# Convert to PDF\nhtml2pdf \"$html_file\" \"$pdf_file\" 2>&1 | while IFS= read -r line; do\n  echo \"$line\" >&2\ndone\n\nif [ -f \"$pdf_file\" ]; then\n  pdfSize=$(wc -c < \"$pdf_file\")\n  echo \"✓ PDF generated: $pdf_file ($pdfSize bytes)\" >&2\n  \n  # Generate clean filename\n  cleanTarget=$(echo \"$target\" | sed 's/[^a-zA-Z0-9.-]/_/g')\n  pdfFilename=\"nmap_report_${cleanTarget}_${timestamp}.pdf\"\n  \n  # Save base64 to separate file\n  base64 \"$pdf_file\" | tr -d '\\n' > \"$binary_file\"\n  echo \"✓ Binary saved: $binary_file\" >&2\n  \n  # Output CLEAN JSON to stdout only (all other output went to stderr)\n  cat <<EOF\n{\"pdfPath\":\"$pdf_file\",\"binaryPath\":\"$binary_file\",\"filename\":\"$pdfFilename\",\"target\":\"$target\",\"timestamp\":\"$timestamp\",\"fileSize\":$pdfSize}\nEOF\n  \nelse\n  echo \"✗ PDF generation failed\" >&2\n  exit 1\nfi\n\n# Clean up\nrm -f \"$html_file\""
+      },
+      "id": "588a2e70-5ab2-4fc5-8ad5-377968eec165",
+      "name": "Convert HTML to PDF",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        176,
+        80
+      ],
+      "notes": "Convert HTML report to PDF using html2pdf helper script (WeasyPrint)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ROBUST PDF OUTPUT PARSER with debugging\n\nconst stdout = $input.first().json.stdout;\n\nconsole.log('=== PARSING PDF CONVERSION OUTPUT ===');\nconsole.log('Raw stdout length:', stdout.length);\n\n// Split into lines\nconst lines = stdout.trim().split('\\n');\nconsole.log('Total lines:', lines.length);\n\n// Show last few lines for debugging\nconsole.log('Last 5 lines:');\nlines.slice(-5).forEach((line, i) => {\n  console.log(`  ${lines.length - 5 + i}: ${line.substring(0, 150)}${line.length > 150 ? '...' : ''}`);\n});\n\n// Find the JSON line (look for line starting with {)\nlet jsonLine = null;\nfor (let i = lines.length - 1; i >= 0; i--) {\n  const line = lines[i].trim();\n  if (line.startsWith('{')) {\n    jsonLine = line;\n    console.log(`Found JSON at line ${i}`);\n    break;\n  }\n}\n\nif (!jsonLine) {\n  console.error('✗ No JSON found in output');\n  console.error('Full output:', stdout);\n  throw new Error('No JSON found in bash output');\n}\n\nconsole.log('JSON to parse:', jsonLine);\n\n// Try to parse\ntry {\n  const pdfInfo = JSON.parse(jsonLine);\n  \n  console.log('✓ Successfully parsed JSON');\n  console.log('  pdfPath:', pdfInfo.pdfPath);\n  console.log('  binaryPath:', pdfInfo.binaryPath);\n  console.log('  filename:', pdfInfo.filename);\n  console.log('  fileSize:', pdfInfo.fileSize);\n  \n  return [{\n    json: {\n      pdfPath: pdfInfo.pdfPath,\n      binaryPath: pdfInfo.binaryPath,\n      filename: pdfInfo.filename,\n      target: pdfInfo.target,\n      timestamp: pdfInfo.timestamp,\n      fileSize: pdfInfo.fileSize\n    }\n  }];\n  \n} catch (e) {\n  console.error('✗ JSON parse error:', e.message);\n  console.error('Attempted to parse:', jsonLine);\n  console.error('Character at error position:', jsonLine.charAt(parseInt(e.message.match(/position (\\d+)/)?.[1]) || 0));\n  \n  // Try to find where JSON might be corrupted\n  let braceCount = 0;\n  for (let i = 0; i < jsonLine.length; i++) {\n    if (jsonLine[i] === '{') braceCount++;\n    if (jsonLine[i] === '}') braceCount--;\n    if (braceCount < 0) {\n      console.error(`Extra closing brace at position ${i}`);\n    }\n  }\n  console.error('Final brace count:', braceCount, '(should be 0)');\n  \n  throw new Error(`Failed to parse PDF output: ${e.message}`);\n}"
+      },
+      "id": "a2f57532-5bda-4390-8c54-a6315b57e5f9",
+      "name": "Parse PDF Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        32
+      ],
+      "notes": "Extract PDF path from command output"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "pdf-path",
+              "name": "pdfPath",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.pdfPath }}"
+            },
+            {
+              "id": "filename",
+              "name": "filename",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.filename }}"
+            },
+            {
+              "id": "target",
+              "name": "target",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.target }}"
+            },
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $('Parse PDF Path').first().json.timestamp }}"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "type": "string",
+              "value": "=Scan complete! PDF report generated: {{ $('Parse PDF Path').first().json.filename }}. Located at: {{ $('Parse PDF Path').first().json.pdfPath }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "295fdb9f-760f-47f6-9119-1c5233e56334",
+      "name": "Report Complete",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        0
+      ],
+      "notes": "Final output with PDF location"
+    },
+    {
+      "parameters": {
+        "command": "=# Nmap Stealth Scan - Bug Bounty Safe\n# Get target from Extract Unique IPs output\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\n\necho \"=== NMAP STEALTH PORT SCAN ===\"\necho \"Target: $target\"\n\n# Clean up \"No IPs found\" or empty targets\nif [ -z \"$target\" ] || [ \"$target\" = \"No IPs found\" ] || [ \"$target\" = \"No IPs to scan\" ]; then\n  echo \"No targets to scan\"\n  exit 0\nfi\n\n# Use top 1000 ports only, stealth timing, less aggressive\nnmap -Pn -sT -sV --version-intensity 2 \\\n  --top-ports 1000 \\\n  -T3 --max-parallelism 20 --max-retries 1 \\\n  --scan-delay 100ms \\\n  -oX /tmp/nmap_${timestamp}.xml \"$target\"\n\nif [ -f /tmp/nmap_${timestamp}.xml ]; then\n  echo \"Nmap scan complete\"\n  cat /tmp/nmap_${timestamp}.xml\nelse\n  echo \"Nmap scan failed\"\n  exit 1\nfi"
+      },
+      "id": "2320447f-b676-4926-b4cd-64f306bbd295",
+      "name": "Top 1K TCP SCAN",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        -976,
+        32
+      ],
+      "typeVersion": 1,
+      "notes": "Stealthier port scan - top ports only, slower timing to avoid detection"
+    },
+    {
+      "parameters": {
+        "command": "=# Nmap Stealth Scan - Bug Bounty Safe\n# Get target from Extract Unique IPs output\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\n\necho \"=== NMAP STEALTH PORT SCAN ===\"\necho \"Target: $target\"\n\n# Clean up \"No IPs found\" or empty targets\nif [ -z \"$target\" ] || [ \"$target\" = \"No IPs found\" ] || [ \"$target\" = \"No IPs to scan\" ]; then\n  echo \"No targets to scan\"\n  exit 0\nfi\n\n# Use top 1000 ports only, stealth timing, less aggressive\nnmap -Pn -sT -sV --version-intensity 2 \\\n  --top-ports 10 \\\n  -T3 --max-parallelism 20 --max-retries 1 \\\n  --scan-delay 100ms \\\n  -oX /tmp/nmap_${timestamp}.xml \"$target\"\n\nif [ -f /tmp/nmap_${timestamp}.xml ]; then\n  echo \"Nmap scan complete\"\n  cat /tmp/nmap_${timestamp}.xml\nelse\n  echo \"Nmap scan failed\"\n  exit 1\nfi"
+      },
+      "id": "a1266de5-56fe-4cb1-a1b8-4c459e6de56a",
+      "name": "Top 10K TCP SCAN",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        -976,
+        192
+      ],
+      "typeVersion": 1,
+      "notes": "Stealthier port scan - top ports only, slower timing to avoid detection"
+    },
+    {
+      "parameters": {
+        "command": "=# Nmap Stealth Scan - Bug Bounty Safe\n# Get target from Extract Unique IPs output\ntimestamp=\"{{ $('1. Set Parameters').item.json.timestamp }}\"\ntarget=\"{{ $json.stdout || $('1. Set Parameters').item.json.target }}\"\n\necho \"=== NMAP STEALTH PORT SCAN ===\"\necho \"Target: $target\"\n\n# Clean up \"No IPs found\" or empty targets\nif [ -z \"$target\" ] || [ \"$target\" = \"No IPs found\" ] || [ \"$target\" = \"No IPs to scan\" ]; then\n  echo \"No targets to scan\"\n  exit 0\nfi\n\n\nnmap -Pn -sT -sV --version-intensity 2 \\\n  -p 100 \\\n  -T3 --max-parallelism 20 --max-retries 1 \\\n  --scan-delay 100ms \\\n  -oX /tmp/nmap_${timestamp}.xml \"$target\"\n\nif [ -f /tmp/nmap_${timestamp}.xml ]; then\n  echo \"Nmap scan complete\"\n  cat /tmp/nmap_${timestamp}.xml\nelse\n  echo \"Nmap scan failed\"\n  exit 1\nfi"
+      },
+      "id": "a2c407de-9d69-4c19-b6c9-111833665670",
+      "name": "ALL ports scan TCP",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [
+        -976,
+        352
+      ],
+      "typeVersion": 1,
+      "notes": "Stealthier port scan - top ports only, slower timing to avoid detection"
+    },
+    {
+      "parameters": {
+        "message": "={{ $json.message }}",
+        "waitUserReply": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        352
+      ],
+      "id": "f3e6ce0e-ac9c-4985-ac1b-99dfc7628bba",
+      "name": "Respond to Chat",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -672,
+        16
+      ],
+      "id": "50d1b410-0b0c-4e5c-b78f-d7ec79cb5bb0",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2000,
+        176
+      ],
+      "id": "c932b2fc-a911-47f2-bce3-5eb9e377717d",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SIMPLE PREPARE REPORT - Raw Nmap Output (No Parsing)\n// Just passes the nmap text output as-is\n\n// Get target and timestamp\nconst target = $('1. Set Parameters').first().json.target || 'Unknown Target';\nconst timestamp = $('1. Set Parameters').first().json.timestamp || new Date().toISOString();\n\n// Get raw nmap output from the merge node\nconst mergedItems = $('Merge').all();\n\nlet rawNmapOutputs = [];\nfor (const item of mergedItems) {\n  if (item.json.stdout) {\n    rawNmapOutputs.push(item.json.stdout);\n  }\n}\n\n// Combine all nmap outputs\nconst combinedNmapOutput = rawNmapOutputs.join('\\n\\n' + '='.repeat(80) + '\\n\\n');\n\nconsole.log('=== PREPARING RAW NMAP REPORT ===');\nconsole.log('Target:', target);\nconsole.log('Output length:', combinedNmapOutput.length, 'characters');\n\n// Create simple report structure\nconst report = {\n  metadata: {\n    title: 'Nmap Port Scan Report',\n    subtitle: 'Raw Output',\n    version: '1.0',\n    scanDate: new Date().toISOString().split('T')[0],\n    scanTime: new Date().toISOString().split('T')[1].split('.')[0],\n    scanTarget: target,\n    timestamp: timestamp,\n    toolsUsed: 'Nmap'\n  },\n  \n  nmapRawOutput: combinedNmapOutput\n};\n\nconsole.log('✓ Raw report prepared');\n\nreturn [{ json: report }];\n"
+      },
+      "id": "110e3b99-bcab-4d25-8e7b-4fcde00d3d8c",
+      "name": "nmap results",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -208,
+        0
+      ],
+      "typeVersion": 2,
+      "notes": "Aggregate all scan data into unified report"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ENHANCED CHAT RESPONSE - Clean Nmap Results\n// Parses nmap output and shows formatted results in chat\n\nconst rawOutput = $input.first().json.stdout || '';\n\nconsole.log('=== PARSING NMAP FOR CHAT ===');\n\n// Extract the text portion (before XML)\nconst xmlStart = rawOutput.indexOf('<?xml');\nconst textOutput = xmlStart > 0 ? rawOutput.substring(0, xmlStart).trim() : rawOutput;\n\n// Parse key information\nlet target = 'Unknown';\nlet scanTime = 'Unknown';\nlet hostsUp = 0;\nlet totalScanned = 0;\n\n// Extract target\nconst targetMatch = textOutput.match(/Target:\\s*(.+)/);\nif (targetMatch) target = targetMatch[1].trim();\n\n// Extract scan time\nconst timeMatch = textOutput.match(/scanned in\\s+([\\d.]+)\\s+seconds/);\nif (timeMatch) scanTime = timeMatch[1];\n\n// Extract hosts info\nconst hostsMatch = textOutput.match(/(\\d+)\\s+IP address.*\\((\\d+)\\s+host[s]?\\s+up\\)/);\nif (hostsMatch) {\n  totalScanned = parseInt(hostsMatch[1]);\n  hostsUp = parseInt(hostsMatch[2]);\n}\n\n// Extract IP address\nlet ipAddress = 'Unknown';\nconst ipMatch = textOutput.match(/Nmap scan report for.*?\\(([0-9.]+)\\)/);\nif (ipMatch) ipAddress = ipMatch[1];\n\n// Parse open ports\nconst ports = [];\nconst portLines = textOutput.split('\\n');\nfor (const line of portLines) {\n  // Match lines like: \"22/tcp open ssh OpenSSH 6.6.1p1\"\n  const portMatch = line.match(/^(\\d+)\\/(tcp|udp)\\s+(open|filtered|closed)\\s+(\\S+)(?:\\s+(.+))?$/);\n  if (portMatch) {\n    const portNum = portMatch[1];\n    const protocol = portMatch[2];\n    const state = portMatch[3];\n    const service = portMatch[4];\n    const version = portMatch[5] || '';\n    \n    // Only include open ports\n    if (state === 'open') {\n      ports.push({\n        port: portNum,\n        protocol,\n        service,\n        version: version.trim()\n      });\n    }\n  }\n}\n\n// Categorize ports by risk\nfunction getRiskLevel(port) {\n  const highRisk = [21, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5432, 5900];\n  const mediumRisk = [110, 143, 8080, 8443, 8000, 8888];\n  const portNum = parseInt(port);\n  if (highRisk.includes(portNum)) return '🔴 HIGH';\n  if (mediumRisk.includes(portNum)) return '🟠 MEDIUM';\n  return '🟢 LOW';\n}\n\n// Build formatted message\nlet message = `**🔍 Nmap Scan Complete**\\n\\n`;\nmessage += `**Target:** ${target}\\n`;\nmessage += `**IP Address:** ${ipAddress}\\n`;\nmessage += `**Scan Time:** ${scanTime}s\\n`;\nmessage += `**Status:** ${hostsUp}/${totalScanned} hosts up\\n\\n`;\n\nif (ports.length === 0) {\n  message += `**Result:** No open ports detected in this scan range.\\n`;\n} else {\n  message += `**Open Ports Found:** ${ports.length}\\n\\n`;\n  \n  // Group by risk\n  const highRiskPorts = ports.filter(p => getRiskLevel(p.port).includes('HIGH'));\n  const mediumRiskPorts = ports.filter(p => getRiskLevel(p.port).includes('MEDIUM'));\n  const lowRiskPorts = ports.filter(p => getRiskLevel(p.port).includes('LOW'));\n  \n  // Show high risk first\n  if (highRiskPorts.length > 0) {\n    message += `**🔴 High Risk Ports:**\\n`;\n    for (const p of highRiskPorts) {\n      message += `  • **${p.port}/${p.protocol}** - ${p.service}`;\n      if (p.version) message += ` (${p.version})`;\n      message += `\\n`;\n    }\n    message += `\\n`;\n  }\n  \n  // Show medium risk\n  if (mediumRiskPorts.length > 0) {\n    message += `**🟠 Medium Risk Ports:**\\n`;\n    for (const p of mediumRiskPorts) {\n      message += `  • **${p.port}/${p.protocol}** - ${p.service}`;\n      if (p.version) message += ` (${p.version})`;\n      message += `\\n`;\n    }\n    message += `\\n`;\n  }\n  \n  // Show low risk\n  if (lowRiskPorts.length > 0) {\n    message += `**🟢 Low Risk Ports:**\\n`;\n    for (const p of lowRiskPorts) {\n      message += `  • **${p.port}/${p.protocol}** - ${p.service}`;\n      if (p.version) message += ` (${p.version})`;\n      message += `\\n`;\n    }\n  }\n}\n\nconsole.log('✓ Chat message formatted');\nconsole.log('  Ports found:', ports.length);\n\nreturn [{\n  json: {\n    message: message,\n    portsFound: ports.length,\n    target: target,\n    scanTime: scanTime\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        256
+      ],
+      "id": "03634153-cba3-4661-94f9-0336e5ba364b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "// COMBINED: Parse Nmap Results + CVE Enrichment with NVD Links\n// This replaces both \"Code in JavaScript1\" node functionality\n\nconst services = $input.first().json.services;\n\nconsole.log('=== STARTING CVE ENRICHMENT WITH NVD LINKS ===');\nconsole.log(`Processing ${services.length} services`);\n\n// Helper function to query NVD API\nasync function queryCVE(product, version) {\n  const searchTerm = `${product} ${version}`.trim();\n  \n  try {\n    console.log(`  Querying NVD for: ${searchTerm}`);\n    \n    const response = await fetch(\n      `https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${encodeURIComponent(searchTerm)}`,\n      {\n        headers: {\n          'User-Agent': 'n8n-port-scanner/1.0'\n        }\n      }\n    );\n    \n    if (!response.ok) {\n      console.error(`  NVD API returned ${response.status}`);\n      return null;\n    }\n    \n    const data = await response.json();\n    \n    // Wait 6 seconds between requests to respect NVD rate limit (5 requests/30 seconds)\n    await new Promise(resolve => setTimeout(resolve, 6000));\n    \n    return data;\n    \n  } catch (error) {\n    console.error(`  Error querying NVD: ${error.message}`);\n    return null;\n  }\n}\n\n// Process each service\nfor (const service of services) {\n  console.log(`\\nProcessing: ${service.service} ${service.version || '(no version)'}`);\n  \n  // Skip if no version detected\n  if (!service.version || service.version === '') {\n    service.cves = 'Version detection required for CVE lookup';\n    service.cveDetails = [];\n    service.cveHtml = '<span style=\"color: #94a3b8; font-style: italic;\">Version detection required for CVE lookup</span>';\n    console.log(`  ○ Skipping - no version detected`);\n    continue;\n  }\n  \n  // Query NVD for CVEs\n  const nvdData = await queryCVE(service.product || service.service, service.version);\n  \n  if (nvdData && nvdData.vulnerabilities && nvdData.vulnerabilities.length > 0) {\n    const cves = [];\n    const cveLinks = [];\n    \n    console.log(`  Found ${nvdData.vulnerabilities.length} total vulnerabilities`);\n    \n    // Extract top 5 CVEs\n    for (const vuln of nvdData.vulnerabilities.slice(0, 5)) {\n      const cve = vuln.cve;\n      const cveId = cve.id;\n      \n      // Get CVSS score and severity\n      let severity = 'Unknown';\n      let score = 0;\n      \n      // Try CVSS v3.1 first (most recent)\n      if (cve.metrics?.cvssMetricV31?.[0]) {\n        score = cve.metrics.cvssMetricV31[0].cvssData.baseScore;\n        severity = cve.metrics.cvssMetricV31[0].cvssData.baseSeverity;\n      } \n      // Fall back to CVSS v3.0\n      else if (cve.metrics?.cvssMetricV30?.[0]) {\n        score = cve.metrics.cvssMetricV30[0].cvssData.baseScore;\n        severity = cve.metrics.cvssMetricV30[0].cvssData.baseSeverity;\n      }\n      // Fall back to CVSS v2\n      else if (cve.metrics?.cvssMetricV2?.[0]) {\n        score = cve.metrics.cvssMetricV2[0].cvssData.baseScore;\n        // Map v2 score to severity\n        if (score >= 7.0) severity = 'HIGH';\n        else if (score >= 4.0) severity = 'MEDIUM';\n        else severity = 'LOW';\n      }\n      \n      // Get description (first English one)\n      const description = cve.descriptions?.find(d => d.lang === 'en')?.value || 'No description available';\n      \n      // Generate NVD link\n      const nvdLink = `https://nvd.nist.gov/vuln/detail/${cveId}`;\n      \n      cves.push({\n        id: cveId,\n        severity: severity,\n        score: score,\n        description: description.substring(0, 200) + (description.length > 200 ? '...' : ''),\n        link: nvdLink\n      });\n      \n      // Create HTML link for this CVE\n      const severityColor = {\n        'CRITICAL': '#dc2626',\n        'HIGH': '#ea580c',\n        'MEDIUM': '#f59e0b',\n        'LOW': '#84cc16',\n        'Unknown': '#94a3b8'\n      }[severity] || '#94a3b8';\n      \n      cveLinks.push(\n        `<a href=\"${nvdLink}\" target=\"_blank\" style=\"color: ${severityColor}; text-decoration: none; font-family: 'Courier New', monospace; font-weight: 600;\">${cveId}</a> <span style=\"color: #94a3b8;\">(${severity}, CVSS: ${score})</span>`\n      );\n      \n      console.log(`    - ${cveId}: ${severity} (CVSS: ${score}) - ${nvdLink}`);\n    }\n    \n    // Format for plain text display\n    service.cves = cves.map(c => `${c.id} (${c.severity}, CVSS: ${c.score})`).join(', ');\n    service.cveDetails = cves;\n    \n    // Format for HTML display with clickable links\n    service.cveHtml = cveLinks.join('<br>');\n    \n    console.log(`  ✓ Enriched with ${cves.length} CVEs (with NVD links)`);\n    \n  } else {\n    service.cves = 'No CVEs found in NVD';\n    service.cveDetails = [];\n    service.cveHtml = '<span style=\"color: #86efac; font-style: italic;\">No CVEs found in NVD</span>';\n    console.log(`  ○ No CVEs found`);\n  }\n}\n\nconsole.log('\\n=== CVE ENRICHMENT COMPLETE ===');\nconsole.log(`Processed ${services.length} services`);\n\nreturn [{ json: { services: services }}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        -176
+      ],
+      "id": "0533e987-7729-4d84-b693-f71a0389d18b",
+      "name": "CVE"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-Set-Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Set Parameters": {
+      "main": [
+        [
+          {
+            "node": "Top 1K TCP SCAN",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Top 10K TCP SCAN",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ALL ports scan TCP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Nmap Results": {
+      "main": [
+        [
+          {
+            "node": "CVE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Comprehensive HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Convert HTML to PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-Set-Target": {
+      "main": [
+        [
+          {
+            "node": "1. Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form Trigger": {
+      "main": [
+        [
+          {
+            "node": "1. Set Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Pre-Set-Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert HTML to PDF": {
+      "main": [
+        [
+          {
+            "node": "Parse PDF Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PDF Path": {
+      "main": [
+        [
+          {
+            "node": "Report Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Top 1K TCP SCAN": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Top 10K TCP SCAN": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "ALL ports scan TCP": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Parse Nmap Results",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-Set-Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "nmap results": {
+      "main": [
+        [
+          {
+            "node": "Generate Comprehensive HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Chat": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Complete": {
+      "main": [
+        []
+      ]
+    },
+    "CVE": {
+      "main": [
+        [
+          {
+            "node": "nmap results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "timezone": "America/New_York",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true
+  },
+  "versionId": "090b21ce-a99d-4a46-8c0c-814983bd0fa9",
+  "meta": {
+    "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
+  },
+  "id": "LdfOaQghREqvTVh9",
+  "tags": []
+}
