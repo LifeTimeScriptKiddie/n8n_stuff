@@ -1,0 +1,544 @@
+{
+  "name": "prompt_collector",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -192,
+        96
+      ],
+      "id": "e16815fd-e847-46b7-889e-0346cd924c4d",
+      "name": "When chat message received",
+      "webhookId": "fa6744cb-1556-441f-a4bf-68708dd74288"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        -48
+      ],
+      "id": "60dded1e-3edf-41ea-80b4-9b7d708478f5",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -192,
+        -192
+      ],
+      "id": "2fddb175-d582-4e34-b2aa-eaa6ef956407",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/code",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.searchQuery }}"
+            },
+            {
+              "name": "per_page",
+              "value": "100"
+            },
+            {
+              "name": "sort",
+              "value": "indexed"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "page",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        -48
+      ],
+      "id": "507c83e8-9a4f-443f-a11c-067855682e33",
+      "name": "HTTP Request",
+      "credentials": {
+        "githubApi": {
+          "id": "ufqP1WSaY7TFIAJr",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract search results and check rate limits\nconst response = $input.first().json;\nconst headers = response.headers || {};\n\n// Rate limit info from GitHub\nconst rateLimit = {\n  limit: parseInt(headers['x-ratelimit-limit'] || '10'),\n  remaining: parseInt(headers['x-ratelimit-remaining'] || '0'),\n  reset: parseInt(headers['x-ratelimit-reset'] || '0'),\n  resetTime: new Date(parseInt(headers['x-ratelimit-reset'] || '0') * 1000).toISOString()\n};\n\n// Search results\nconst body = response.body || {};\nconst items = body.items || [];\n\nconsole.log(`Rate Limit: ${rateLimit.remaining}/${rateLimit.limit} remaining`);\nconsole.log(`Found ${items.length} results (total: ${body.total_count || 0})`);\n\n// Create nice summary\nconst summary = {\n  timestamp: new Date().toISOString(),\n  search_query: $('Edit Fields (Set)').first().json.searchQuery,\n  rateLimit: rateLimit,\n  results: {\n    total_count: body.total_count || 0,\n    returned: items.length,\n    all_files: items.map(item => ({\n      name: item.name,\n      repository: item.repository.full_name,\n      url: item.html_url,\n      stars: item.repository.stargazers_count\n    }))\n  }\n};\n\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -48
+      ],
+      "id": "aae6cd67-c109-43c6-87ce-c575535a9a55",
+      "name": "Process Results"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f078b3ba-9c8b-4f5d-ba1a-d086a5295bef",
+              "name": "searchQuery",
+              "value": "\"jailbreak\" OR \"DAN\" OR \"ignore all instructions\" OR \"prompt injection\" extension:md extension:txt",
+              "type": "string"
+            },
+            {
+              "id": "10cc4919-eba5-4c3a-b771-9b94f2de0243",
+              "name": "tier",
+              "value": "high_priority",
+              "type": "string"
+            },
+            {
+              "id": "a2602e2b-13dc-469c-bd87-573fe03f8eb8",
+              "name": "=timestamp",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        16,
+        -48
+      ],
+      "id": "a3e48d27-17f7-4202-a353-4bb75ade5a69",
+      "name": "Edit Fields (Set)"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "results.all_files",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        640,
+        -48
+      ],
+      "id": "06b7dab6-2270-4765-9a74-503302a155b0",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json[\"results.all_files\"].url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/') }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        848,
+        -48
+      ],
+      "id": "8381bd0f-317d-4f29-a107-0283e8dce606",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "edit",
+        "owner": {
+          "__rl": true,
+          "value": "LifeTimeScriptKiddie",
+          "mode": "list",
+          "cachedResultName": "LifeTimeScriptKiddie",
+          "cachedResultUrl": "https://github.com/LifeTimeScriptKiddie"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "Prompt_Collector",
+          "mode": "list",
+          "cachedResultName": "Prompt_Collector",
+          "cachedResultUrl": "https://github.com/LifeTimeScriptKiddie/Prompt_Collector"
+        },
+        "filePath": "README.md",
+        "fileContent": "={{ $json.output }}",
+        "commitMessage": "n8n"
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        2224,
+        -32
+      ],
+      "id": "4450b1cf-e237-4384-bebe-4318fb911df3",
+      "name": "Edit a file",
+      "webhookId": "0d97b3dd-cd57-44c0-88ec-b028b488f998",
+      "credentials": {
+        "githubApi": {
+          "id": "ufqP1WSaY7TFIAJr",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "prompts",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1376,
+        -48
+      ],
+      "id": "b4a03897-830d-4ca1-b489-1a9f19252522",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fileData = $input.first().json;\n\n// Decode content safely\nlet content = '';\nif (fileData.content) {\n  content = Buffer.from(fileData.content, 'base64').toString('utf-8');\n} else if (fileData.body) {\n  content = fileData.body;\n}\n\n// Hard stop if empty\nif (!content || content.length < 50) {\n  return [{\n    json: {\n      debug: 'No content or too short',\n      length: content.length\n    }\n  }];\n}\n\n// Simple hash\nfunction simpleHash(str) {\n  let hash = 5381;\n  for (let i = 0; i < str.length; i++) {\n    hash = ((hash << 5) + hash) + str.charCodeAt(i);\n    hash &= hash;\n  }\n  return 'djb2_' + (hash >>> 0).toString(16);\n}\n\n// Loosened indicators\nconst jailbreakIndicators = [\n  /jailbreak/i,\n  /prompt/i,\n  /injection/i,\n  /DAN/i,\n  /ignore/i,\n  /bypass/i\n];\n\nif (!jailbreakIndicators.some(p => p.test(content))) {\n  return [{\n    json: {\n      debug: 'Filtered: no jailbreak indicators',\n      preview: content.slice(0, 200)\n    }\n  }];\n}\n\n// Metadata\nlet metadata = {};\ntry {\n  metadata = $('Split Out').first().json;\n} catch {\n  metadata = {};\n}\n\nreturn [{\n  json: {\n    content_hash: simpleHash(content),\n    content_length: content.length,\n    content_preview: content.slice(0, 300),\n    repository: metadata.repository,\n    file_name: metadata.name,\n    validated: true,\n    collected_at: new Date($execution.startTime).toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        240
+      ],
+      "id": "22b13e05-1aac-4e24-a825-1dafc2253a5d",
+      "name": "Validate & Filter",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=I have scanned {{ $json.prompts.length }} files for prompt injections. \n\nNEW DATA: {{ JSON.stringify($json.prompts) }}\n\nEXISTING README CONTENT: \n{{ $node[\"Get a file\"].json.content }}\n\nTASK: \n1. Identify actual prompt injections from the \"NEW DATA\".\n2. Append them to the Markdown table in the \"EXISTING README\".\n3. Do not write any code or explanations. Output ONLY the updated Markdown.",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "🤖 Polished AI Agent System Message\n\nCopy and paste this into the System Message box of your AI Agent node:\n\n    Role: You are a Security Intelligence Analyst specializing in Large Language Model (LLM) vulnerabilities.\n\n    Goal: Maintain a professional Markdown \"Prompt Injection Database\" report.\n\n    Input handling: > 1. You will receive \"Existing README Content\" and \"New Search Results\" (JSON). 2. Filter: Identify actual prompt injections (Jailbreaks, Leakage, Hijacking) from the new results. Ignore general documentation or blog posts.\n\n    Merging & Deduplication Logic:\n\n        Preserve: Keep all existing rows from the provided README table.\n\n        Deduplicate: Do not add a row if the Repository and Query already exist in the table.\n\n        Append: Add only unique, new entries to the bottom of the existing table.\n\n    Formatting Rules:\n\n        Query cleaning: Escape pipe characters (| to \\|) and remove all newlines from the query text so it remains on a single row.\n\n        Truncation: If a Query is longer than 1000 characters, truncate it with \"...\" to keep the table readable.\n\n        Source Column: Create a clickable Markdown link using the url field: [View Source](URL).\n\n        Strict Output: Output ONLY the final Markdown content starting with the header # 🔍 Collected Prompt Injection Database. Do NOT output Python code, intro text, or conversational filler.\n\n    Table Structure: | Category | Query (Raw) | Repository | Source |"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1872,
+        -80
+      ],
+      "id": "b60d3205-27ef-4ffa-a973-323e450766de",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        144
+      ],
+      "id": "127b60ea-5abd-4e50-9dfb-3b2fa8986d8d",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "zA63wPfKNnCad6x0",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "get",
+        "owner": {
+          "__rl": true,
+          "value": "LifeTimeScriptKiddie",
+          "mode": "list",
+          "cachedResultName": "LifeTimeScriptKiddie",
+          "cachedResultUrl": "https://github.com/LifeTimeScriptKiddie"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "Prompt_Collector",
+          "mode": "list",
+          "cachedResultName": "Prompt_Collector",
+          "cachedResultUrl": "https://github.com/LifeTimeScriptKiddie/Prompt_Collector"
+        },
+        "filePath": "README.md",
+        "additionalParameters": {}
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        1584,
+        -48
+      ],
+      "id": "e5709c09-505a-4bbe-8add-5af1810d5afe",
+      "name": "Get a file",
+      "webhookId": "ec84d073-72a8-4c17-9e96-34f921dffa6d",
+      "credentials": {
+        "githubApi": {
+          "id": "ufqP1WSaY7TFIAJr",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  item.json.data = item.json.data.substring(0, 1500);\n}\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        -48
+      ],
+      "id": "24a72027-1bee-4a8d-b8e6-3cd1278a8e0e",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-4-5-20250929",
+          "cachedResultName": "Claude Sonnet 4.5"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        1872,
+        176
+      ],
+      "id": "d3cc529f-de06-4927-93a0-608c9d5dff8c",
+      "name": "Anthropic Chat Model1",
+      "credentials": {
+        "anthropicApi": {
+          "id": "7U2ea2IurqGpWkEB",
+          "name": "Anthropic account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields (Set)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Process Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields (Set)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields (Set)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields (Set)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Results": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit a file": {
+      "main": [
+        []
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Get a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Filter": {
+      "main": [
+        []
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Edit a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a file": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true,
+    "timezone": "America/New_York"
+  },
+  "versionId": "2b8d75be-1155-43e2-a6e9-6c451ef29c1f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "029e05f1295ce04c906d8a947f2712cc8515b81fcccb47c14c4d3503ffed64a5"
+  },
+  "id": "zob2dimFAVdsAz86",
+  "tags": []
+}
